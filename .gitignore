@@ -4,6 +4,9 @@
 /.idea/workspace.xml
 /.idea/libraries
 /.idea/assetWizardSettings.xml
+/.idea/jarRepositories.xml
+/.idea/misc.xml
+
 .DS_Store
 /build
 /captures
@@ -14,3 +17,8 @@ _Emoji/emoji-data/
 *.apk
 output.json
 *.log
+/.idea/StickySelectionHighlights.xml
+/.idea/caches/
+/.idea/codeStyles/
+/_Emoji/*
+/app/rc/release/

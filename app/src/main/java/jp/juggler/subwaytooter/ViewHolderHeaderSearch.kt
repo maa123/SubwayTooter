@@ -27,8 +27,11 @@ internal class ViewHolderHeaderSearch(
 		super.bindData(column)
 		
 		tvSearchDesc.textColor = column.getContentColor()
-		tvSearchDesc.text = DecodeOptions(activity, access_info, decodeEmoji = true)
-			.decodeHTML(column.getHeaderDesc() ?: "")
+		tvSearchDesc.text = DecodeOptions(
+			activity, access_info, decodeEmoji = true,
+			mentionDefaultHostDomain = access_info
+		)
+			.decodeHTML(column.getHeaderDesc() )
 	}
 	
 	override fun onViewRecycled() {

@@ -15,10 +15,7 @@ import jp.juggler.subwaytooter.action.Action_List
 import jp.juggler.subwaytooter.action.Action_ListMember
 import jp.juggler.subwaytooter.action.makeAccountListNonPseudo
 import jp.juggler.subwaytooter.api.*
-import jp.juggler.subwaytooter.api.entity.EntityId
-import jp.juggler.subwaytooter.api.entity.TootAccount
-import jp.juggler.subwaytooter.api.entity.TootList
-import jp.juggler.subwaytooter.api.entity.parseList
+import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.table.AcctColor
 import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.subwaytooter.util.NetworkEmojiInvalidator
@@ -41,7 +38,7 @@ class DlgListMember(
 	private val btnCreateList : Button
 	
 	private val account_list : ArrayList<SavedAccount>
-	private val target_user_full_acct : String
+	private val target_user_full_acct : Acct
 	
 	private var list_owner : SavedAccount? = null
 	private var local_who : TootAccount? = null
@@ -84,7 +81,7 @@ class DlgListMember(
 		val name = who.decodeDisplayName(activity)
 		tvUserName.text = name
 		user_name_invalidator.register(name)
-		tvUserAcct.text = target_user_full_acct
+		tvUserAcct.text = target_user_full_acct.pretty
 		
 		setListOwner(list_owner)
 		
@@ -137,23 +134,21 @@ class DlgListMember(
 		this.list_owner = a
 		if(a == null) {
 			btnListOwner.setText(R.string.not_selected)
-			btnListOwner.setTextColor(getAttributeColor(activity, android.R.attr.textColorPrimary))
-			btnListOwner.setBackgroundResource(R.drawable.btn_bg_transparent)
+			btnListOwner.setTextColor(activity.attrColor( android.R.attr.textColorPrimary))
+			btnListOwner.setBackgroundResource(R.drawable.btn_bg_transparent_round6dp)
 			//
 			
 		} else {
-			val acct = a.acct
-			val ac = AcctColor.load(acct)
-			val nickname = if(AcctColor.hasNickname(ac)) ac.nickname else acct
-			btnListOwner.text = nickname
+			val ac = AcctColor.load(a)
+			btnListOwner.text = ac.nickname
 			
 			if(AcctColor.hasColorBackground(ac)) {
 				btnListOwner.setBackgroundColor(ac.color_bg)
 			} else {
-				btnListOwner.setBackgroundResource(R.drawable.btn_bg_transparent)
+				btnListOwner.setBackgroundResource(R.drawable.btn_bg_transparent_round6dp)
 			}
 			btnListOwner.textColor = ac.color_fg.notZero()
-				?: getAttributeColor(activity, android.R.attr.textColorPrimary)
+				?: activity.attrColor( android.R.attr.textColorPrimary)
 		}
 		
 		loadLists()
@@ -172,7 +167,7 @@ class DlgListMember(
 			
 			var new_list : ArrayList<TootList>? = null
 			
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				
 				// 現在の登録状況を知るため、対象ユーザの自タンスでのアカウントIDを取得する
 				// ドメインブロックなどの影響で同期できない場合があるが、
@@ -180,7 +175,7 @@ class DlgListMember(
 				val (r1, ar) = client.syncAccountByAcct(list_owner, target_user_full_acct)
 				r1 ?: return null // cancelled.
 				val local_who = ar?.get() // may null
-				if(local_who == null) showToast(activity, true, r1.error)
+				if(local_who == null) activity.showToast( true, r1.error)
 				
 				this@DlgListMember.local_who = local_who
 				
@@ -239,14 +234,14 @@ class DlgListMember(
 				}
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				showList(new_list)
 				
 				result ?: return // cancelled.
 				
 				val error = result.error
 				if(error?.isNotEmpty() == true) {
-					showToast(activity, true, result.error)
+					activity.showToast( true, result.error)
 				}
 				
 			}
@@ -270,30 +265,28 @@ class DlgListMember(
 			activity,
 			activity.getString(R.string.list_create),
 			null,
-			object : DlgTextInput.Callback {
+			callback = object : DlgTextInput.Callback {
 				
 				override fun onEmptyError() {
-					showToast(activity, false, R.string.list_name_empty)
+					activity.showToast( false, R.string.list_name_empty)
 				}
 				
 				override fun onOK(dialog : Dialog, text : String) {
 					val list_owner = this@DlgListMember.list_owner
 					
 					if(list_owner == null) {
-						showToast(activity, false, "list owner is not selected.")
+						activity.showToast( false, "list owner is not selected.")
 						return
 					}
 					
 					Action_List.create(
 						activity,
 						list_owner,
-						text,
-						object : Action_List.CreateCallback {
-							override fun onCreated(list : TootList) {
-								dialog.dismissSafe()
-								loadLists()
-							}
-						})
+						text
+					) {
+						dialog.dismissSafe()
+						loadLists()
+					}
 				}
 				
 			})
@@ -303,7 +296,7 @@ class DlgListMember(
 	
 	private inner class MyListAdapter : BaseAdapter() {
 
-		internal val item_list = ArrayList<Any>()
+		val item_list = ArrayList<Any>()
 		
 		override fun getCount() : Int = item_list.size
 		
@@ -383,14 +376,14 @@ class DlgListMember(
 			
 			val list_owner = this@DlgListMember.list_owner
 			if(list_owner == null) {
-				showToast(activity, false, "list owner is not selected")
+				activity.showToast( false, "list owner is not selected")
 				revokeCheckedChanged(isChecked)
 				return
 			}
 			
 			val local_who = this@DlgListMember.local_who
 			if(local_who == null) {
-				showToast(activity, false, "target user is not synchronized")
+				activity.showToast( false, "target user is not synchronized")
 				revokeCheckedChanged(isChecked)
 				return
 			}

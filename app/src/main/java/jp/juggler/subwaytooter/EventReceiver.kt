@@ -3,6 +3,7 @@ package jp.juggler.subwaytooter
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import jp.juggler.subwaytooter.notification.PollingWorker
 
 import jp.juggler.util.LogCategory
 
@@ -22,13 +23,8 @@ class EventReceiver : BroadcastReceiver() {
 			Intent.ACTION_MY_PACKAGE_REPLACED ->
 				PollingWorker.queuePackageReplaced(context)
 			
-			ACTION_NOTIFICATION_DELETE -> {
-				PollingWorker.queueNotificationDeleted(
-					context,
-					intent.getLongExtra(PollingWorker.EXTRA_DB_ID, - 1L),
-					intent.getStringExtra(PollingWorker.EXTRA_NOTIFICATION_TYPE) ?: ""
-				)
-			}
+			ACTION_NOTIFICATION_DELETE ->
+				PollingWorker.queueNotificationDeleted( context,intent.data)
 			
 			else -> log.e("onReceive: unsupported action %s", action)
 		}

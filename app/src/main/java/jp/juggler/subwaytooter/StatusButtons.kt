@@ -11,11 +11,15 @@ import com.google.android.flexbox.FlexWrap
 import com.google.android.flexbox.FlexboxLayout
 import com.google.android.flexbox.JustifyContent
 import jp.juggler.subwaytooter.action.*
+import jp.juggler.subwaytooter.api.entity.TootInstance
 import jp.juggler.subwaytooter.api.entity.TootNotification
 import jp.juggler.subwaytooter.api.entity.TootStatus
 import jp.juggler.subwaytooter.api.entity.TootVisibility
 import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.subwaytooter.table.UserRelation
+import jp.juggler.subwaytooter.util.CustomShare
+import jp.juggler.subwaytooter.util.CustomShareTarget
+import jp.juggler.subwaytooter.util.emptyCallback
 import jp.juggler.subwaytooter.util.startMargin
 import jp.juggler.subwaytooter.view.CountImageButton
 import jp.juggler.util.*
@@ -33,6 +37,7 @@ internal class StatusButtons(
 ) : View.OnClickListener, View.OnLongClickListener {
 	
 	companion object {
+		
 		val log = LogCategory("StatusButtons")
 	}
 	
@@ -48,6 +53,7 @@ internal class StatusButtons(
 	private val btnBoost = holder.btnBoost
 	private val btnFavourite = holder.btnFavourite
 	private val btnBookmark = holder.btnBookmark
+	private val btnQuote = holder.btnQuote
 	private val llFollow2 = holder.llFollow2
 	private val btnFollow2 = holder.btnFollow2
 	private val ivFollowedBy2 = holder.ivFollowedBy2
@@ -60,7 +66,7 @@ internal class StatusButtons(
 	private val color_normal = column.getContentColor()
 	
 	private val color_accent : Int
-		get() = getAttributeColor(activity, R.attr.colorImageButtonAccent)
+		get() = activity.attrColor(R.attr.colorImageButtonAccent)
 	
 	init {
 		this.access_info = column.access_info
@@ -71,12 +77,20 @@ internal class StatusButtons(
 		btnFavourite.setOnLongClickListener(this)
 		btnBookmark.setOnClickListener(this)
 		btnBookmark.setOnLongClickListener(this)
+		btnQuote.setOnClickListener(this)
+		btnQuote.setOnLongClickListener(this)
 		btnFollow2.setOnClickListener(this)
 		btnFollow2.setOnLongClickListener(this)
 		btnTranslate.setOnClickListener(this)
 		btnCustomShare1.setOnClickListener(this)
 		btnCustomShare2.setOnClickListener(this)
 		btnCustomShare3.setOnClickListener(this)
+		btnTranslate.setOnLongClickListener(this)
+		btnCustomShare1.setOnLongClickListener(this)
+		btnCustomShare2.setOnLongClickListener(this)
+		btnCustomShare3.setOnLongClickListener(this)
+		
+		
 		btnMore.setOnClickListener(this)
 		btnConversation.setOnClickListener(this)
 		btnConversation.setOnLongClickListener(this)
@@ -93,7 +107,7 @@ internal class StatusButtons(
 		this.status = status
 		this.notification = notification
 		
-		val replies_count = status.replies_count
+		val pref = activity.pref
 		
 		setIconDrawableId(
 			activity,
@@ -102,6 +116,7 @@ internal class StatusButtons(
 			color = color_normal,
 			alphaMultiplier = Styler.boost_alpha
 		)
+		
 		setIconDrawableId(
 			activity,
 			btnMore,
@@ -110,24 +125,12 @@ internal class StatusButtons(
 			alphaMultiplier = Styler.boost_alpha
 		)
 		
-		//		val a = (((color_normal ushr 24)/255f) * 0.7f)
-		
-		// setIconDrawableId で色を指定するとアルファ値も反映されるらしい
-		//		btnConversation.alpha = a
-		//		btnMore.alpha = a
-		//
-		//		btnReply.alpha = a
-		//		btnBoost.alpha = a
-		//		btnFavourite.alpha = a
-		//		btnFollow2.alpha = a
-		//		ivFollowedBy2.alpha = a
-		
 		setButton(
 			btnReply,
 			true,
 			color_normal,
 			R.drawable.ic_reply,
-			when(replies_count) {
+			when(val replies_count = status.replies_count) {
 				null -> ""
 				else -> when(Pref.ipRepliesCount(activity.pref)) {
 					Pref.RC_SIMPLE -> when {
@@ -145,34 +148,61 @@ internal class StatusButtons(
 		// ブーストボタン
 		when {
 			// マストドンではDirectはブーストできない (Misskeyはできる)
-			(! access_info.isMisskey && status.visibility.order <= TootVisibility.DirectSpecified.order) -> setButton(
-				btnBoost,
-				false,
-				color_accent,
-				R.drawable.ic_mail,
-				"",
-				activity.getString(R.string.boost)
-			)
+			(! access_info.isMisskey && status.visibility.order <= TootVisibility.DirectSpecified.order) ->
+				setButton(
+					btnBoost,
+					false,
+					color_accent,
+					R.drawable.ic_mail,
+					"",
+					activity.getString(R.string.boost)
+				)
 			
-			activity.app_state.isBusyBoost(access_info, status) -> setButton(
-				btnBoost,
-				false,
-				color_normal,
-				R.drawable.ic_refresh,
-				"?",
-				activity.getString(R.string.boost)
-			)
+			activity.app_state.isBusyBoost(access_info, status) ->
+				setButton(
+					btnBoost,
+					false,
+					color_normal,
+					R.drawable.ic_refresh,
+					"?",
+					activity.getString(R.string.boost)
+				)
 			
 			else -> setButton(
 				btnBoost,
 				true,
-				if(status.reblogged) color_accent else color_normal,
+				if(status.reblogged)
+					Pref.ipButtonBoostedColor(pref).notZero() ?: color_accent
+				else
+					color_normal,
 				R.drawable.ic_repeat,
-				status.reblogs_count?.toString() ?: "",
+				when(val boosts_count = status.reblogs_count) {
+					null -> ""
+					else -> when(Pref.ipBoostsCount(activity.pref)) {
+						Pref.RC_SIMPLE -> when {
+							boosts_count >= 2L -> "1+"
+							boosts_count == 1L -> "1"
+							else -> ""
+						}
+						Pref.RC_ACTUAL -> boosts_count.toString()
+						else -> ""
+					}
+				},
 				activity.getString(R.string.boost)
 			)
 		}
 		
+		val ti = TootInstance.getCached(access_info.apiHost.ascii)
+		btnQuote.vg(ti?.feature_quote == true)?.let{
+			setButton(
+				btnQuote,
+				true,
+				color_normal,
+				R.drawable.ic_quote,
+				activity.getString(R.string.quote)
+			)
+		}
+
 		// お気に入りボタン
 		val fav_icon_drawable = when {
 			access_info.isNicoru(status.account) -> R.drawable.ic_nicoru
@@ -191,9 +221,23 @@ internal class StatusButtons(
 			else -> setButton(
 				btnFavourite,
 				true,
-				if(status.favourited) color_accent else color_normal,
+				if(status.favourited)
+					Pref.ipButtonFavoritedColor(pref).notZero() ?: color_accent
+				else
+					color_normal,
 				fav_icon_drawable,
-				status.favourites_count?.toString() ?: "",
+				when(val favourites_count = status.favourites_count) {
+					null -> ""
+					else -> when(Pref.ipFavouritesCount(activity.pref)) {
+						Pref.RC_SIMPLE -> when {
+							favourites_count >= 2L -> "1+"
+							favourites_count == 1L -> "1"
+							else -> ""
+						}
+						Pref.RC_ACTUAL -> favourites_count.toString()
+						else -> ""
+					}
+				},
 				activity.getString(R.string.favourite)
 			)
 		}
@@ -213,7 +257,10 @@ internal class StatusButtons(
 			else -> setButton(
 				btnBookmark,
 				true,
-				if(status.bookmarked) color_accent else color_normal,
+				if(status.bookmarked)
+					Pref.ipButtonBookmarkedColor(pref).notZero() ?: color_accent
+				else
+					color_normal,
 				R.drawable.ic_bookmark,
 				activity.getString(R.string.bookmark)
 			)
@@ -426,6 +473,12 @@ internal class StatusButtons(
 				Action_Toot.replyFromAnotherAccount(activity, access_info, status)
 			}
 			
+			btnQuote -> if(! access_info.isPseudo) {
+				Action_Toot.reply(activity, access_info, status, quote = true)
+			} else {
+				Action_Toot.replyFromAnotherAccount(activity, access_info, status, quote = true)
+			}
+			
 			btnBoost -> {
 				if(access_info.isPseudo) {
 					Action_Toot.boostFromAnotherAccount(activity, access_info, status)
@@ -440,13 +493,13 @@ internal class StatusButtons(
 						status,
 						access_info.getFullAcct(status.account),
 						NOT_CROSS_ACCOUNT,
-						when {
-							! bSimpleList -> null
+						bSet = bSet,
+						callback = when {
+							! bSimpleList -> emptyCallback
 							// 簡略表示なら結果をトースト表示
 							bSet -> activity.boost_complete_callback
 							else -> activity.unboost_complete_callback
 						},
-						bSet = bSet
 					)
 				}
 			}
@@ -464,13 +517,13 @@ internal class StatusButtons(
 						access_info,
 						status,
 						NOT_CROSS_ACCOUNT,
-						when {
-							! bSimpleList -> null
+						bSet = bSet,
+						callback = when {
+							! bSimpleList -> emptyCallback
 							// 簡略表示なら結果をトースト表示
 							bSet -> activity.favourite_complete_callback
 							else -> activity.unfavourite_complete_callback
 						},
-						bSet = bSet
 					)
 				}
 			}
@@ -488,13 +541,13 @@ internal class StatusButtons(
 						access_info,
 						status,
 						NOT_CROSS_ACCOUNT,
-						when {
-							! bSimpleList -> null
+						bSet = bSet,
+						callback = when {
+							! bSimpleList -> emptyCallback
 							// 簡略表示なら結果をトースト表示
 							bSet -> activity.bookmark_complete_callback
 							else -> activity.unbookmark_complete_callback
 						},
-						bSet = bSet
 					)
 				}
 			}
@@ -623,17 +676,50 @@ internal class StatusButtons(
 				activity, access_info, status
 			)
 			
+			btnQuote -> Action_Toot.replyFromAnotherAccount(
+				activity, access_info, status, quote = true
+			)
+			
 			btnFollow2 -> Action_Follow.followFromAnotherAccount(
 				activity, activity.nextPosition(column), access_info, status.account
+			)
+			
+			btnTranslate -> shareUrl(
+				status,
+				CustomShareTarget.Translate
+			)
+			
+			btnCustomShare1 -> shareUrl(
+				status,
+				CustomShareTarget.CustomShare1
+			)
+			
+			btnCustomShare2 -> shareUrl(
+				status,
+				CustomShareTarget.CustomShare2
+			)
+			
+			btnCustomShare3 -> shareUrl(
+				status,
+				CustomShareTarget.CustomShare3
 			)
 			
 		}
 		return true
 	}
 	
+	private fun shareUrl(
+		status : TootStatus,
+		target : CustomShareTarget
+	) {
+		val url = status.url ?: status.uri
+		
+		CustomShare.invoke(activity, url, target)
+	}
 }
 
 open class _FlexboxLayout(ctx : Context) : FlexboxLayout(ctx) {
+	
 	inline fun <T : View> T.lparams(
 		width : Int = android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
 		height : Int = android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -647,10 +733,10 @@ open class _FlexboxLayout(ctx : Context) : FlexboxLayout(ctx) {
 }
 
 class StatusButtonsViewHolder(
-	activity : ActMain
-	, lpWidth : Int
-	, topMarginDp : Float
-	, @JustifyContent justifyContent : Int = JustifyContent.CENTER
+	activity : ActMain,
+	lpWidth : Int,
+	topMarginDp : Float,
+	@JustifyContent justifyContent : Int = JustifyContent.CENTER
 ) {
 	
 	private val buttonHeight = ActMain.boostButtonSize
@@ -668,6 +754,7 @@ class StatusButtonsViewHolder(
 	lateinit var btnBoost : CountImageButton
 	lateinit var btnFavourite : CountImageButton
 	lateinit var btnBookmark : ImageButton
+	lateinit var btnQuote : ImageButton
 	lateinit var llFollow2 : View
 	lateinit var btnFollow2 : ImageButton
 	lateinit var ivFollowedBy2 : ImageView
@@ -694,7 +781,7 @@ class StatusButtonsViewHolder(
 						
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						contentDescription = context.getString(R.string.conversation_view)
 						
@@ -707,7 +794,7 @@ class StatusButtonsViewHolder(
 						
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -720,7 +807,7 @@ class StatusButtonsViewHolder(
 						
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -732,7 +819,7 @@ class StatusButtonsViewHolder(
 					btnFavourite = customView<CountImageButton> {
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -745,7 +832,20 @@ class StatusButtonsViewHolder(
 					btnBookmark = imageButton {
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
+						)
+						setPadding(paddingH, paddingV, paddingH, paddingV)
+						scaleType = ImageView.ScaleType.FIT_CENTER
+						minimumWidth = buttonHeight
+						
+					}.lparams(wrapContent, buttonHeight) {
+						startMargin = marginBetween
+					}
+					
+					btnQuote = imageButton {
+						background = ContextCompat.getDrawable(
+							context,
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -764,7 +864,7 @@ class StatusButtonsViewHolder(
 							
 							background = ContextCompat.getDrawable(
 								context,
-								R.drawable.btn_bg_transparent
+								R.drawable.btn_bg_transparent_round6dp
 							)
 							setPadding(paddingH, paddingV, paddingH, paddingV)
 							scaleType = ImageView.ScaleType.FIT_CENTER
@@ -786,7 +886,7 @@ class StatusButtonsViewHolder(
 					btnMore = imageButton {
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -802,7 +902,7 @@ class StatusButtonsViewHolder(
 					btnTranslate = imageButton {
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -814,7 +914,7 @@ class StatusButtonsViewHolder(
 					btnCustomShare1 = imageButton {
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -826,7 +926,7 @@ class StatusButtonsViewHolder(
 					btnCustomShare2 = imageButton {
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER
@@ -838,7 +938,7 @@ class StatusButtonsViewHolder(
 					btnCustomShare3 = imageButton {
 						background = ContextCompat.getDrawable(
 							context,
-							R.drawable.btn_bg_transparent
+							R.drawable.btn_bg_transparent_round6dp
 						)
 						setPadding(paddingH, paddingV, paddingH, paddingV)
 						scaleType = ImageView.ScaleType.FIT_CENTER

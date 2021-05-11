@@ -6,8 +6,6 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.util.AttributeSet
 import android.widget.LinearLayout
-import jp.juggler.subwaytooter.R
-import jp.juggler.util.getAttributeColor
 
 // 画面下のカラムストリップのLinearLayout
 // 可視範囲を示すインジケーターを表示する
@@ -24,9 +22,8 @@ class ColumnStripLinearLayout : LinearLayout {
 	// インジケーターの色
 	var indicatorColor : Int = 0
 		set(value) {
-			val c = if(value != 0) value else getAttributeColor(context, R.attr.colorAccent)
-			if(field != c) {
-				field = c
+			if(field != value) {
+				field = value
 				invalidate()
 			}
 		}

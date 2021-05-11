@@ -13,12 +13,13 @@ import com.woxthebox.draglistview.swipe.ListSwipeHelper
 import com.woxthebox.draglistview.swipe.ListSwipeItem
 import jp.juggler.subwaytooter.table.UserRelation
 import jp.juggler.util.LogCategory
-import jp.juggler.util.getAttributeColor
+import jp.juggler.util.attrColor
 import java.util.*
 
 class ActMutedPseudoAccount : AppCompatActivity() {
 	
 	companion object {
+		
 		private val log = LogCategory("ActMutedPseudoAccount")
 	}
 	
@@ -160,20 +161,19 @@ class ActMutedPseudoAccount : AppCompatActivity() {
 	}
 	
 	// ドラッグ操作中のデータ
-	private inner class MyDragItem internal constructor(context : Context, layoutId : Int) :
+	private inner class MyDragItem(context : Context, layoutId : Int) :
 		DragItem(context, layoutId) {
 		
 		override fun onBindDragView(clickedView : View, dragView : View) {
 			dragView.findViewById<TextView>(R.id.tvName).text =
 				clickedView.findViewById<TextView>(R.id.tvName).text
 			
-			dragView.findViewById<View>(R.id.item_layout).setBackgroundColor(
-				getAttributeColor(this@ActMutedPseudoAccount, R.attr.list_item_bg_pressed_dragged)
-			)
+			dragView.findViewById<View>(R.id.item_layout)
+				.setBackgroundColor(attrColor(R.attr.list_item_bg_pressed_dragged))
 		}
 	}
 	
-	private inner class MyListAdapter internal constructor() :
+	private inner class MyListAdapter :
 		DragItemAdapter<MyItem, MyViewHolder>() {
 		
 		init {

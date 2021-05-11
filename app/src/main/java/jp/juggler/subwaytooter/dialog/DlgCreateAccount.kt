@@ -1,7 +1,6 @@
 package jp.juggler.subwaytooter.dialog
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.Dialog
 import android.view.View
 import android.view.WindowManager
@@ -9,16 +8,21 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.TextView
-import jp.juggler.subwaytooter.App1
+import androidx.appcompat.app.AppCompatActivity
 import jp.juggler.subwaytooter.R
+import jp.juggler.subwaytooter.api.entity.Host
 import jp.juggler.subwaytooter.api.entity.TootInstance
 import jp.juggler.subwaytooter.util.DecodeOptions
 import jp.juggler.subwaytooter.util.LinkHelper
-import jp.juggler.util.*
+import jp.juggler.subwaytooter.util.openCustomTab
+import jp.juggler.util.neatSpaces
+import jp.juggler.util.notBlank
+import jp.juggler.util.showToast
+import jp.juggler.util.vg
 
 class DlgCreateAccount(
-	val activity : Activity,
-	val instance : String,
+	val activity : AppCompatActivity,
+	val instance : Host,
 	val onClickOk : (
 		dialog : Dialog,
 		username : String,
@@ -48,7 +52,7 @@ class DlgCreateAccount(
 	private val dialog = Dialog(activity)
 	
 	init {
-		viewRoot.findViewById<TextView>(R.id.tvInstance).text = instance
+		viewRoot.findViewById<TextView>(R.id.tvInstance).text = instance.pretty
 		
 		arrayOf(
 			R.id.btnRules,
@@ -59,21 +63,20 @@ class DlgCreateAccount(
 			viewRoot.findViewById<Button>(it)?.setOnClickListener(this)
 		}
 		
-		val instanceInfo = TootInstance.getCached(instance)
+		val instanceInfo = TootInstance.getCached(instance.ascii)
 		
 		tvDescription.text =
 			DecodeOptions(
 				activity,
-				LinkHelper.newLinkHelper(
-					instance, misskeyVersion = instanceInfo?.misskeyVersion ?: 0
+				linkHelper = LinkHelper.create(
+					instance,
+					misskeyVersion = instanceInfo?.misskeyVersion ?: 0
 				)
-			)
-				.decodeHTML(
-					instanceInfo?.short_description?.notBlank()
-						?: instanceInfo?.description?.notBlank()
-						?: TootInstance.DESCRIPTION_DEFAULT
-				)
-				.neatSpaces()
+			).decodeHTML(
+				instanceInfo?.short_description?.notBlank()
+					?: instanceInfo?.description?.notBlank()
+					?: TootInstance.DESCRIPTION_DEFAULT
+			).neatSpaces()
 		
 		val showReason = instanceInfo?.approval_required ?: false
 		tvReasonCaption.vg(showReason)
@@ -94,10 +97,10 @@ class DlgCreateAccount(
 	override fun onClick(v : View?) {
 		when(v?.id) {
 			R.id.btnRules ->
-				App1.openCustomTab(activity, "https://$instance/about/more")
+				activity.openCustomTab("https://$instance/about/more")
 			
 			R.id.btnTerms ->
-				App1.openCustomTab(activity, "https://$instance/terms")
+				activity.openCustomTab("https://$instance/terms")
 			
 			R.id.btnCancel ->
 				dialog.cancel()
@@ -109,16 +112,16 @@ class DlgCreateAccount(
 				
 				when {
 					username.isEmpty() ->
-						showToast(activity, true, R.string.username_empty)
+						activity.showToast(true, R.string.username_empty)
 					
 					email.isEmpty() ->
-						showToast(activity, true, R.string.email_empty)
+						activity.showToast(true, R.string.email_empty)
 					
 					password.isEmpty() ->
-						showToast(activity, true, R.string.password_empty)
+						activity.showToast(true, R.string.password_empty)
 					
 					username.contains("/") || username.contains("@") ->
-						showToast(activity, true, R.string.username_not_need_atmark)
+						activity.showToast(true, R.string.username_not_need_atmark)
 					
 					else -> onClickOk(
 						dialog,

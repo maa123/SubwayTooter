@@ -5,13 +5,13 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.DialogInterface
 import android.content.res.ColorStateList
+import android.content.res.TypedArray
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.drawable.*
 import android.graphics.drawable.shapes.RectShape
-import android.os.Build
 import android.os.SystemClock
 import android.text.Editable
 import android.text.TextWatcher
@@ -22,7 +22,8 @@ import androidx.core.content.ContextCompat
 import jp.juggler.subwaytooter.R
 import java.util.*
 
-object UiUtils{
+object UiUtils {
+	
 	val log = LogCategory("UiUtils")
 }
 
@@ -37,56 +38,38 @@ fun Int.applyAlphaMultiplier(alphaMultiplier : Float? = null) : Int {
 	}
 }
 
-
-fun getAttributeColor(context : Context, attrId : Int) : Int {
-	val theme = context.theme
+fun Context.attrColor(attrId : Int) : Int {
 	val a = theme.obtainStyledAttributes(intArrayOf(attrId))
 	val color = a.getColor(0, Color.BLACK)
 	a.recycle()
 	return color
 }
 
+fun<T> TypedArray.use(block:(TypedArray)->T):T =
+	try{ block(this) }finally{ 	recycle() }
 
-fun getAttributeDrawable(context : Context, attrId : Int) : Drawable {
-	
-	fun getAttributeResourceId(context : Context, attrId : Int) : Int {
-		val theme = context.theme
-		val a = theme.obtainStyledAttributes(intArrayOf(attrId))
-		val resourceId = a.getResourceId(0, 0)
-		a.recycle()
-		if(resourceId == 0)
-			throw RuntimeException(
-				String.format(
-					Locale.JAPAN,
-					"attr not defined.attr_id=0x%x",
-					attrId
-				)
-			)
-		return resourceId
-	}
-	
-	val drawableId = getAttributeResourceId(context, attrId)
-	val d = ContextCompat.getDrawable(context, drawableId)
-	return d ?: throw RuntimeException(
-		String.format(
-			Locale.JAPAN,
-			"getDrawable failed. drawableId=0x%x",
-			drawableId
-		)
-	)
+fun Context.getAttributeResourceId( attrId : Int) =
+	 theme.obtainStyledAttributes(intArrayOf(attrId))
+		 .use{ it.getResourceId(0, 0) }
+		 .notZero() ?: error("missing resource id. attr_id=0x${attrId.toString(16)}")
+
+fun Context.attrDrawable( attrId : Int) : Drawable {
+	val drawableId = getAttributeResourceId( attrId)
+	return ContextCompat.getDrawable(this, drawableId)
+		?: error("getDrawable failed. drawableId=0x${drawableId.toString(16)}")
 }
 
 /////////////////////////////////////////////////////////
 
 // 後方互換用にボタン背景Drawableを生成する
-private fun getStateListDrawable(normalColor : Int, pressedColor : Int) : StateListDrawable {
-	val states = StateListDrawable()
-	states.addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(pressedColor))
-	states.addState(intArrayOf(android.R.attr.state_focused), ColorDrawable(pressedColor))
-	states.addState(intArrayOf(android.R.attr.state_activated), ColorDrawable(pressedColor))
-	states.addState(intArrayOf(), ColorDrawable(normalColor))
-	return states
-}
+//private fun getStateListDrawable(normalColor : Int, pressedColor : Int) : StateListDrawable {
+//	val states = StateListDrawable()
+//	states.addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(pressedColor))
+//	states.addState(intArrayOf(android.R.attr.state_focused), ColorDrawable(pressedColor))
+//	states.addState(intArrayOf(android.R.attr.state_activated), ColorDrawable(pressedColor))
+//	states.addState(intArrayOf(), ColorDrawable(normalColor))
+//	return states
+//}
 
 // 色を指定してRectShapeを生成する
 private fun getRectShape(color : Int) : Drawable {
@@ -96,14 +79,46 @@ private fun getRectShape(color : Int) : Drawable {
 	return shapeDrawable
 }
 
+// 色を指定して角丸Drawableを作成する
+fun createRoundDrawable(
+	radius : Float,
+	fillColor : Int? = null,
+	strokeColor : Int? = null,
+	strokeWidth : Int = 4
+) =
+	GradientDrawable().apply {
+		cornerRadius = radius
+		if(fillColor != null) setColor(fillColor)
+		if(strokeColor != null) setStroke(strokeWidth, strokeColor)
+	}
+
 // 色を指定してRippleDrawableを生成する
 fun getAdaptiveRippleDrawable(normalColor : Int, pressedColor : Int) : Drawable {
-	return if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+	return RippleDrawable(ColorStateList.valueOf(pressedColor), getRectShape(normalColor), null)
+}
+
+// 色を指定してRippleDrawableを生成する
+fun getAdaptiveRippleDrawableRound(
+	context : Context,
+	normalColor : Int,
+	pressedColor : Int,
+	roundNormal : Boolean = false
+) : Drawable {
+	val dp6 = context.resources.displayMetrics.density * 6f
+	return if(roundNormal) {
+		// 押してない時に通常色を塗る範囲も角丸にする
 		RippleDrawable(
-			ColorStateList.valueOf(pressedColor), getRectShape(normalColor), null
+			ColorStateList.valueOf(pressedColor),
+			createRoundDrawable(dp6, fillColor = normalColor),
+			null
 		)
 	} else {
-		getStateListDrawable(normalColor, pressedColor)
+		// 押してない時に通常色を塗る範囲は四角だが、リップルエフェクトは角丸
+		return RippleDrawable(
+			ColorStateList.valueOf(pressedColor),
+			getRectShape(normalColor),
+			createRoundDrawable(dp6, Color.WHITE)
+		)
 	}
 }
 
@@ -180,7 +195,7 @@ fun createColoredDrawable(
 	alphaMultiplier : Float
 ) : Drawable {
 	val rgb = (color and 0xffffff) or Color.BLACK
-	val alpha = if(alphaMultiplier >= 1f ) {
+	val alpha = if(alphaMultiplier >= 1f) {
 		(color ushr 24)
 	} else {
 		clipRange(0, 255, ((color ushr 24).toFloat() * alphaMultiplier + 0.5f).toInt())
@@ -255,7 +270,7 @@ fun setIconDrawableId(
 //	)
 //}
 
-fun CharSequence.copyToClipboard(context:Context) {
+fun CharSequence.copyToClipboard(context : Context) {
 	try {
 		// Gets a handle to the clipboard service.
 		val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -268,16 +283,15 @@ fun CharSequence.copyToClipboard(context:Context) {
 		
 		clipboard.setPrimaryClip(clip)
 		
-		showToast(context, false, R.string.copy_complete)
+		context.showToast(false, R.string.copy_complete)
 	} catch(ex : Throwable) {
 		UiUtils.log.trace(ex)
-		showToast(context, ex, "copy failed.")
+		context.showToast(ex, "copy failed.")
 	}
 	
 }
 
-
-fun DialogInterface.dismissSafe(){
+fun DialogInterface.dismissSafe() {
 	try {
 		dismiss()
 	} catch(ignored : Throwable) {
@@ -286,7 +300,7 @@ fun DialogInterface.dismissSafe(){
 }
 
 class CustomTextWatcher(
-	val callback: ()->Unit
+	val callback : () -> Unit
 ) : TextWatcher {
 	
 	override fun beforeTextChanged(
@@ -305,14 +319,14 @@ class CustomTextWatcher(
 }
 
 // ImageButton のForeground colorで有効/無効を表現する
-fun ImageButton.setEnabledColor(context:Context, iconId: Int,color:Int, enabled: Boolean) {
+fun ImageButton.setEnabledColor(context : Context, iconId : Int, color : Int, enabled : Boolean) {
 	isEnabled = enabled
 	setImageDrawable(
 		createColoredDrawable(
 			context = context,
 			drawableId = iconId,
 			color = color,
-			alphaMultiplier = when (enabled) {
+			alphaMultiplier = when(enabled) {
 				true -> 1f
 				else -> 0.5f
 			}

@@ -1,10 +1,10 @@
 package jp.juggler.subwaytooter.api.entity
 
 import jp.juggler.subwaytooter.api.TootParser
-import jp.juggler.subwaytooter.util.HTMLDecoder
+import jp.juggler.subwaytooter.pref
+import jp.juggler.subwaytooter.util.DecodeOptions
+import jp.juggler.util.JsonObject
 import jp.juggler.util.filterNotEmpty
-import jp.juggler.util.parseString
-import org.json.JSONObject
 
 class TootCard(
 	
@@ -26,34 +26,43 @@ class TootCard(
 	val provider_name : String? = null,
 	val provider_url : String? = null,
 	
+	val blurhash : String? = null,
+	
 	val originalStatus : TootStatus? = null
 ) {
 	
-	constructor(src : JSONObject) : this(
-		url = src.parseString("url"),
-		title = src.parseString("title"),
-		description = src.parseString("description"),
-		image = src.parseString("image"),
+	constructor(src : JsonObject) : this(
+		url = src.string("url"),
+		title = src.string("title"),
+		description = src.string("description"),
+		image = src.string("image"),
 		
-		type = src.parseString("type"),
-		author_name = src.parseString("author_name"),
-		author_url = src.parseString("author_url"),
-		provider_name = src.parseString("provider_name"),
-		provider_url = src.parseString("provider_url")
-	
+		type = src.string("type"),
+		author_name = src.string("author_name"),
+		author_url = src.string("author_url"),
+		provider_name = src.string("provider_name"),
+		provider_url = src.string("provider_url"),
+		blurhash = src.string("blurhash")
 	)
 	
 	constructor(parser : TootParser, src : TootStatus) : this(
 		originalStatus = src,
 		url = src.url,
-		title = "${src.account.display_name} @${parser.getFullAcct(src.account.acct)}",
+		title = "${src.account.display_name} @${parser.getFullAcct(src.account.acct).pretty}",
 		description = src.spoiler_text.filterNotEmpty()
 			?: if(parser.serviceType == ServiceType.MISSKEY) {
 				src.content
 			} else {
-				HTMLDecoder.encodeEntity(src.content ?: "")
+				DecodeOptions(
+					context = parser.context,
+					decodeEmoji = true,
+					mentionDefaultHostDomain = src.account
+				).decodeHTML(src.content ?: "").toString()
 			},
-		image = src.media_attachments?.firstOrNull()?.urlForThumbnail ?: src.account.avatar_static,
+		image = src.media_attachments
+			?.firstOrNull()
+			?.urlForThumbnail(parser.context.pref())
+			?: src.account.avatar_static,
 		type = "photo"
 	)
 }

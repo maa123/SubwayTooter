@@ -3,12 +3,15 @@ package jp.juggler.subwaytooter.util
 import android.content.Context
 import android.content.Intent
 import jp.juggler.subwaytooter.ActText
+import jp.juggler.subwaytooter.App1
+import jp.juggler.subwaytooter.Pref
 import jp.juggler.subwaytooter.R
 import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.table.SavedAccount
 import java.util.*
 
 object TootTextEncoder {
+	
 	private fun StringBuilder.addAfterLine(text : CharSequence) {
 		if(isNotEmpty() && this[length - 1] != '\n') {
 			append('\n')
@@ -67,7 +70,8 @@ object TootTextEncoder {
 			DecodeOptions(
 				context,
 				access_info,
-				mentions = status.mentions
+				mentions = status.mentions,
+				mentionDefaultHostDomain = status.account
 			).decodeHTML(status.content)
 		)
 		
@@ -98,7 +102,8 @@ object TootTextEncoder {
 			DecodeOptions(
 				context,
 				access_info,
-				mentions = status.mentions
+				mentions = status.mentions,
+				mentionDefaultHostDomain = status.account
 			).decodeHTML(status.content)
 		)
 		
@@ -146,8 +151,7 @@ object TootTextEncoder {
 			
 			// MastodonとMisskeyは投票の選択肢が本文に含まれないので
 			// アプリ側で文字列化する
-			
-			TootPollsType.Mastodon -> when {
+			TootPollsType.Mastodon,TootPollsType.Notestock -> when {
 				enquete.expired -> false
 				now >= enquete.expired_at -> false
 				enquete.ownVoted -> false
@@ -194,7 +198,7 @@ object TootTextEncoder {
 				item.decoded_text
 			}
 			
-			TootPollsType.Mastodon -> if(canVote) {
+			TootPollsType.Mastodon ,TootPollsType.Notestock -> if(canVote) {
 				item.decoded_text
 			} else {
 				val sb2 = StringBuilder().append(item.decoded_text)
@@ -266,7 +270,13 @@ object TootTextEncoder {
 		
 		sb.addAfterLine("\n")
 		
-		sb.append(DecodeOptions(context, access_info).decodeHTML(who.note))
+		sb.append(
+			DecodeOptions(
+				context,
+				access_info,
+				mentionDefaultHostDomain = who
+			).decodeHTML(who.note)
+		)
 		
 		sb.addAfterLine("\n")
 		
@@ -291,18 +301,21 @@ object TootTextEncoder {
 		
 		addHeader(context, sb, R.string.send_header_account_created_at, who.created_at)
 		addHeader(context, sb, R.string.send_header_account_statuses_count, who.statuses_count)
-		addHeader(
-			context,
-			sb,
-			R.string.send_header_account_followers_count,
-			who.followers_count
-		)
-		addHeader(
-			context,
-			sb,
-			R.string.send_header_account_following_count,
-			who.following_count
-		)
+		
+		if(! Pref.bpHideFollowCount(App1.getAppState(context).pref)) {
+			addHeader(
+				context,
+				sb,
+				R.string.send_header_account_followers_count,
+				who.followers_count
+			)
+			addHeader(
+				context,
+				sb,
+				R.string.send_header_account_following_count,
+				who.following_count
+			)
+		}
 		addHeader(context, sb, R.string.send_header_account_locked, who.locked)
 		
 		sb.addAfterLine(String.format(Locale.JAPAN, "Account-Source: %s", who.json.toString(2)))

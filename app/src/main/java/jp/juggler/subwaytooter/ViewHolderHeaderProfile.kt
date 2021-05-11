@@ -1,6 +1,8 @@
 package jp.juggler.subwaytooter
 
+import android.app.Dialog
 import android.graphics.Color
+import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -9,17 +11,17 @@ import android.widget.*
 import jp.juggler.emoji.EmojiMap
 import jp.juggler.subwaytooter.action.Action_Follow
 import jp.juggler.subwaytooter.action.Action_User
-import jp.juggler.subwaytooter.api.MisskeyAccountDetailMap
-import jp.juggler.subwaytooter.api.entity.TootAccount
-import jp.juggler.subwaytooter.api.entity.TootAccountRef
-import jp.juggler.subwaytooter.api.entity.TootStatus
+import jp.juggler.subwaytooter.api.*
+import jp.juggler.subwaytooter.api.entity.*
+import jp.juggler.subwaytooter.dialog.DlgTextInput
 import jp.juggler.subwaytooter.span.EmojiImageSpan
+import jp.juggler.subwaytooter.span.LinkInfo
+import jp.juggler.subwaytooter.span.MyClickableSpan
 import jp.juggler.subwaytooter.span.createSpan
 import jp.juggler.subwaytooter.table.AcctColor
+import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.subwaytooter.table.UserRelation
-import jp.juggler.subwaytooter.util.DecodeOptions
-import jp.juggler.subwaytooter.util.NetworkEmojiInvalidator
-import jp.juggler.subwaytooter.util.startMargin
+import jp.juggler.subwaytooter.util.*
 import jp.juggler.subwaytooter.view.MyLinkMovementMethod
 import jp.juggler.subwaytooter.view.MyNetworkImageView
 import jp.juggler.subwaytooter.view.MyTextView
@@ -34,6 +36,8 @@ internal class ViewHolderHeaderProfile(
 	private val ivBackground : MyNetworkImageView
 	private val tvCreated : TextView
 	private val tvLastStatusAt : TextView
+	private val tvFeaturedTags : TextView
+
 	private val ivAvatar : MyNetworkImageView
 	private val tvDisplayName : TextView
 	private val tvAcct : TextView
@@ -67,11 +71,15 @@ internal class ViewHolderHeaderProfile(
 	private val density : Float
 	private val btnMore : ImageButton
 	
+	private val tvPersonalNotes : TextView
+	private val btnPersonalNotesEdit : ImageButton
+	
 	init {
 		ivBackground = viewRoot.findViewById(R.id.ivBackground)
 		llProfile = viewRoot.findViewById(R.id.llProfile)
 		tvCreated = viewRoot.findViewById(R.id.tvCreated)
 		tvLastStatusAt = viewRoot.findViewById(R.id.tvLastStatusAt)
+		tvFeaturedTags = viewRoot.findViewById(R.id.tvFeaturedTags)
 		ivAvatar = viewRoot.findViewById(R.id.ivAvatar)
 		tvDisplayName = viewRoot.findViewById(R.id.tvDisplayName)
 		tvAcct = viewRoot.findViewById(R.id.tvAcct)
@@ -94,18 +102,28 @@ internal class ViewHolderHeaderProfile(
 		ivMovedBy = viewRoot.findViewById(R.id.ivMovedBy)
 		llFields = viewRoot.findViewById(R.id.llFields)
 		
+		tvPersonalNotes = viewRoot.findViewById(R.id.tvPersonalNotes)
+		btnPersonalNotesEdit = viewRoot.findViewById(R.id.btnPersonalNotesEdit)
+		
+		
 		density = tvDisplayName.resources.displayMetrics.density
 		
-		ivBackground.setOnClickListener(this)
-		btnFollowing.setOnClickListener(this)
-		btnFollowers.setOnClickListener(this)
-		btnStatusCount.setOnClickListener(this)
-		btnMore.setOnClickListener(this)
-		btnFollow.setOnClickListener(this)
-		tvRemoteProfileWarning.setOnClickListener(this)
-		
-		btnMoved.setOnClickListener(this)
-		llMoved.setOnClickListener(this)
+		for(v in arrayOf(
+			ivBackground,
+			btnFollowing,
+			btnFollowers,
+			btnStatusCount,
+			btnMore,
+			btnFollow,
+			tvRemoteProfileWarning,
+			btnPersonalNotesEdit,
+			
+			btnMoved,
+			llMoved,
+			btnPersonalNotesEdit
+		)) {
+			v.setOnClickListener(this)
+		}
 		
 		btnMoved.setOnLongClickListener(this)
 		btnFollow.setOnLongClickListener(this)
@@ -123,13 +141,15 @@ internal class ViewHolderHeaderProfile(
 	override fun showColor() {
 		llProfile.setBackgroundColor(
 			when(val c = column.column_bg_color) {
-				0 -> getAttributeColor(activity, R.attr.colorProfileBackgroundMask)
+				0 -> activity.attrColor(R.attr.colorProfileBackgroundMask)
 				else -> - 0x40000000 or (0x00ffffff and c)
 			}
 		)
 	}
 	
 	private var contentColor = 0
+	
+	private var relation : UserRelation? = null
 	
 	override fun bindData(column : Column) {
 		super.bindData(column)
@@ -140,6 +160,8 @@ internal class ViewHolderHeaderProfile(
 		if(! f.isNaN()) {
 			tvMovedName.textSize = f
 			tvMoved.textSize = f
+			tvPersonalNotes.textSize = f
+			tvFeaturedTags.textSize = f
 		}
 		
 		f = activity.acct_font_size_sp
@@ -158,6 +180,7 @@ internal class ViewHolderHeaderProfile(
 		val contentColor = column.getContentColor()
 		this.contentColor = contentColor
 		
+		tvPersonalNotes.textColor = contentColor
 		tvMoved.textColor = contentColor
 		tvMovedName.textColor = contentColor
 		tvDisplayName.textColor = contentColor
@@ -166,7 +189,8 @@ internal class ViewHolderHeaderProfile(
 		btnStatusCount.textColor = contentColor
 		btnFollowing.textColor = contentColor
 		btnFollowers.textColor = contentColor
-		
+		tvFeaturedTags.textColor = contentColor
+
 		setIconDrawableId(
 			activity,
 			btnMore,
@@ -175,10 +199,19 @@ internal class ViewHolderHeaderProfile(
 			alphaMultiplier = Styler.boost_alpha
 		)
 		
+		setIconDrawableId(
+			activity,
+			btnPersonalNotesEdit,
+			R.drawable.ic_edit,
+			color = contentColor,
+			alphaMultiplier = Styler.boost_alpha
+		)
+		
 		val acctColor = column.getAcctColor()
 		tvCreated.textColor = acctColor
 		tvMovedAcct.textColor = acctColor
 		tvLastStatusAt.textColor = acctColor
+
 		
 		val whoRef = column.who_account
 		this.whoRef = whoRef
@@ -199,8 +232,10 @@ internal class ViewHolderHeaderProfile(
 		llFields.removeAllViews()
 		
 		if(who == null) {
+			relation = null
 			tvCreated.text = ""
 			tvLastStatusAt.vg(false)
+			tvFeaturedTags.vg(false)
 			ivBackground.setImageDrawable(null)
 			ivAvatar.setImageDrawable(null)
 			
@@ -229,6 +264,28 @@ internal class ViewHolderHeaderProfile(
 				invalidator = null,
 				fromProfileHeader = true
 			)
+
+			val featuredTagsText = column.who_featured_tags?.notEmpty()?.let{  tagList->
+				SpannableStringBuilder().apply {
+					append(activity.getString(R.string.featured_hashtags))
+					append(":")
+					tagList.forEach { tag ->
+						append(" ")
+						val tagWithSharp = "#" + tag.name
+						val start = length
+						append(tagWithSharp)
+						val end = length
+						tag.url?.notEmpty()?.let{ url->
+							val span = MyClickableSpan(LinkInfo(url = url, tag = tag.name, caption = tagWithSharp))
+							setSpan(span, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+						}
+					}
+				}
+			}
+			tvFeaturedTags.vg( featuredTagsText !=null)?.let{
+				it.text = featuredTagsText!!
+				it.movementMethod = MyLinkMovementMethod
+			}
 			
 			ivBackground.setImageUrl(
 				activity.pref,
@@ -265,13 +322,13 @@ internal class ViewHolderHeaderProfile(
 				
 				append("@")
 				
-				append(access_info.getFullAcct(who))
+				append(access_info.getFullAcct(who).pretty)
 				
 				if(whoDetail?.locked ?: who.locked) {
 					append(" ")
-					val info = EmojiMap.sShortNameToEmojiInfo["lock"]
-					if(info != null) {
-						appendSpan("locked", info.er.createSpan(activity))
+					val emoji = EmojiMap.shortNameMap["lock"]
+					if(emoji != null) {
+						appendSpan("locked",emoji.createSpan(activity))
 					} else {
 						append("locked")
 					}
@@ -279,11 +336,21 @@ internal class ViewHolderHeaderProfile(
 				
 				if(who.bot) {
 					append(" ")
-					val info = EmojiMap.sShortNameToEmojiInfo["robot_face"]
-					if(info != null) {
-						appendSpan("bot", info.er.createSpan(activity))
+					val emoji = EmojiMap.shortNameMap["robot_face"]
+					if(emoji != null) {
+						appendSpan("bot", emoji.createSpan(activity))
 					} else {
 						append("bot")
+					}
+				}
+
+				if(who.suspended) {
+					append(" ")
+					val emoji = EmojiMap.shortNameMap["cross_mark"]
+					if(emoji != null) {
+						appendSpan("suspended", emoji.createSpan(activity))
+					} else {
+						append("suspended")
 					}
 				}
 			}
@@ -325,16 +392,29 @@ internal class ViewHolderHeaderProfile(
 			tvMisskeyExtra.vg(tvMisskeyExtra.text.isNotEmpty())
 			
 			btnStatusCount.text =
-				"${activity.getString(R.string.statuses)}\n${whoDetail?.statuses_count
-					?: who.statuses_count}"
-			btnFollowing.text =
-				"${activity.getString(R.string.following)}\n${whoDetail?.following_count
-					?: who.following_count}"
-			btnFollowers.text =
-				"${activity.getString(R.string.followers)}\n${whoDetail?.followers_count
-					?: who.followers_count}"
+				"${activity.getString(R.string.statuses)}\n${
+					whoDetail?.statuses_count
+						?: who.statuses_count
+				}"
+			
+			if(Pref.bpHideFollowCount(activity.pref)) {
+				btnFollowing.text = activity.getString(R.string.following)
+				btnFollowers.text = activity.getString(R.string.followers)
+			} else {
+				btnFollowing.text =
+					"${activity.getString(R.string.following)}\n${
+						whoDetail?.following_count ?: who.following_count
+					}"
+				btnFollowers.text =
+					"${activity.getString(R.string.followers)}\n${
+						whoDetail?.followers_count ?: who.followers_count
+					}"
+				
+			}
 			
 			val relation = UserRelation.load(access_info.db_id, who.id)
+			this.relation = relation
+			
 			Styler.setFollowIcon(
 				activity,
 				btnFollow,
@@ -344,6 +424,8 @@ internal class ViewHolderHeaderProfile(
 				contentColor,
 				alphaMultiplier = Styler.boost_alpha
 			)
+			
+			tvPersonalNotes.text = relation.note ?: ""
 			
 			showMoved(who, who.movedRef)
 			
@@ -361,7 +443,8 @@ internal class ViewHolderHeaderProfile(
 					linkHelper = access_info,
 					short = true,
 					emojiMapCustom = who.custom_emojis,
-					emojiMapProfile = who.profile_emojis
+					emojiMapProfile = who.profile_emojis,
+					mentionDefaultHostDomain = who
 				)
 				
 				val nameTypeface = ActMain.timeline_font_bold
@@ -404,9 +487,14 @@ internal class ViewHolderHeaderProfile(
 						valueText.append(TootStatus.formatTime(activity, item.verified_at, false))
 						val end = valueText.length
 						
+						val linkFgColor = Pref.ipVerifiedLinkFgColor(activity.pref).notZero()
+							?: (Color.BLACK or 0x7fbc99)
+						
 						valueText.setSpan(
-							ForegroundColorSpan(Color.BLACK or 0x7fbc99)
-							, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+							ForegroundColorSpan(linkFgColor),
+							start,
+							end,
+							Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
 						)
 					}
 					
@@ -421,7 +509,10 @@ internal class ViewHolderHeaderProfile(
 					valueView.movementMethod = MyLinkMovementMethod
 					
 					if(item.verified_at > 0L) {
-						valueView.setBackgroundColor(0x337fbc99)
+						val linkBgColor = Pref.ipVerifiedLinkBgColor(activity.pref).notZero()
+							?: (0x337fbc99)
+						
+						valueView.setBackgroundColor(linkBgColor)
 					}
 					
 					llFields.addView(valueView)
@@ -455,7 +546,7 @@ internal class ViewHolderHeaderProfile(
 		tvMovedName.text = movedRef.decoded_display_name
 		moved_name_invalidator.register(movedRef.decoded_display_name)
 		
-		setAcct(tvMovedAcct, access_info.getFullAcct(moved), moved.acct)
+		setAcct(tvMovedAcct, access_info, moved)
 		
 		val relation = UserRelation.load(access_info.db_id, moved.id)
 		Styler.setFollowIcon(
@@ -469,12 +560,12 @@ internal class ViewHolderHeaderProfile(
 		)
 	}
 	
-	private fun setAcct(tv : TextView, acctLong : String, acctShort : String) {
-		val ac = AcctColor.load(acctLong)
+	private fun setAcct(tv : TextView, accessInfo : SavedAccount, who : TootAccount) {
+		val ac = AcctColor.load(accessInfo, who)
 		tv.text = when {
 			AcctColor.hasNickname(ac) -> ac.nickname
-			Pref.bpShortAcctLocalUser(App1.pref) -> "@$acctShort"
-			else -> acctLong
+			Pref.bpShortAcctLocalUser(App1.pref) -> "@${who.acct.pretty}"
+			else -> "@${ac.nickname}"
 		}
 		
 		tv.textColor = ac.color_fg.notZero() ?: column.getAcctColor()
@@ -488,9 +579,8 @@ internal class ViewHolderHeaderProfile(
 		
 		when(v.id) {
 			
-			R.id.ivBackground, R.id.tvRemoteProfileWarning -> whoRef?.get()?.url?.let { url ->
-				App1.openCustomTab(activity, url)
-			}
+			R.id.ivBackground, R.id.tvRemoteProfileWarning ->
+				activity.openCustomTab(whoRef?.get()?.url)
 			
 			R.id.btnFollowing -> {
 				column.profile_tab = ProfileTab.Following
@@ -533,6 +623,54 @@ internal class ViewHolderHeaderProfile(
 						movedRef.get()
 					)
 				}
+			}
+			
+			R.id.btnPersonalNotesEdit -> whoRef?.let { whoRef ->
+				val who = whoRef.get()
+				val relation = this.relation
+				val lastColumn = column
+				DlgTextInput.show(
+					activity,
+					AcctColor.getStringWithNickname(activity, R.string.personal_notes_of, who.acct),
+					relation?.note ?: "",
+					allowEmpty = true,
+					callback = object : DlgTextInput.Callback {
+						override fun onEmptyError() {
+						}
+						
+						override fun onOK(dialog : Dialog, text : String) {
+							TootTaskRunner(activity).run(column.access_info, object : TootTask {
+								override suspend fun background(client : TootApiClient) : TootApiResult? {
+									
+									if(access_info.isPseudo)
+										return TootApiResult("Personal notes is not supported on pseudo account.")
+									
+									if(access_info.isMisskey)
+										return TootApiResult("Personal notes is not supported on Misskey account.")
+									
+									return client.request(
+										"/api/v1/accounts/${who.id}/note",
+										jsonObject {
+											put("comment", text)
+										}.toPostRequestBuilder()
+									)
+								}
+								
+								override suspend fun handleResult(result : TootApiResult?) {
+									if(result == null) return
+									if(result.error != null)
+										activity.showToast(true, result.error)
+									else {
+										relation?.note = text
+										dialog.dismissSafe()
+										if(lastColumn == column) bindData(column)
+									}
+								}
+							})
+						}
+					}
+				)
+				
 			}
 		}
 	}

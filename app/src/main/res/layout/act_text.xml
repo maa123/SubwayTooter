@@ -79,10 +79,18 @@
             />
 
         <Button
-            android:id="@+id/btnSearchMSP"
+            android:id="@+id/btnSearchNotestock"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/toot_search_msp"
+            android:text="@string/toot_search_notestock"
+            android:textAllCaps="false"
+            />
+
+        <Button
+            android:id="@+id/btnTranslate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/translate"
             android:textAllCaps="false"
             />
 

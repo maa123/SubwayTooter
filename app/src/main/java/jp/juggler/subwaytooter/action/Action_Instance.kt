@@ -2,11 +2,11 @@ package jp.juggler.subwaytooter.action
 
 import jp.juggler.subwaytooter.*
 import jp.juggler.subwaytooter.api.*
-import jp.juggler.subwaytooter.api.entity.EntityId
-import jp.juggler.subwaytooter.api.entity.TootInstance
-import jp.juggler.subwaytooter.api.entity.TootStatus
+import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.dialog.AccountPicker
 import jp.juggler.subwaytooter.table.SavedAccount
+import jp.juggler.subwaytooter.util.matchHost
+import jp.juggler.subwaytooter.util.openBrowser
 import jp.juggler.util.*
 import java.util.*
 
@@ -16,7 +16,7 @@ object Action_Instance {
 	private fun profileDirectory(
 		activity : ActMain,
 		accessInfo : SavedAccount,
-		host : String,
+		host : Host,
 		instance : TootInstance? = null,
 		pos : Int = activity.defaultInsertPosition
 	) {
@@ -24,31 +24,31 @@ object Action_Instance {
 			// インスタンスのバージョン情報がなければ取得してやり直し
 			instance == null -> TootTaskRunner(activity).run(host, object : TootTask {
 				var targetInstance : TootInstance? = null
-				override fun background(client : TootApiClient) : TootApiResult? {
-					val (ti, ri) = TootInstance.get(client, host, allowPixelfed = true)
+				override suspend fun background(client : TootApiClient) : TootApiResult? {
+					val (ti, ri) = TootInstance.getEx(client, host, allowPixelfed = true)
 					targetInstance = ti
 					return ri
 				}
 				
-				override fun handleResult(result : TootApiResult?) {
+				override suspend fun handleResult(result : TootApiResult?) {
 					result ?: return // cancelled.
 					when(val ti = targetInstance) {
-						null -> showToast(activity, true, result.error)
+						null -> activity.showToast(true, result.error)
 						else -> profileDirectory(activity, accessInfo, host, ti, pos)
 					}
 				}
 			})
 			
 			// Misskey非対応
-			instance.instanceType == TootInstance.InstanceType.Misskey ->
-				showToast(activity, false, R.string.profile_directory_not_supported_on_misskey)
+			instance.instanceType == InstanceType.Misskey ->
+				activity.showToast(false, R.string.profile_directory_not_supported_on_misskey)
 			
 			// バージョンが足りないならWebページを開く
 			! instance.versionGE(TootInstance.VERSION_3_0_0_rc1) ->
-				App1.openBrowser(activity, "https://$host/explore")
+				activity.openBrowser("https://${host.ascii}/explore")
 			
 			// ホスト名部分が一致するならそのアカウントで開く
-			accessInfo.host == host ->
+			accessInfo.matchHost(host) ->
 				activity.addColumn(
 					false,
 					pos,
@@ -83,7 +83,7 @@ object Action_Instance {
 				ColumnType.PROFILE_DIRECTORY.name1(activity)
 			)
 		) { ai ->
-			profileDirectory(activity, ai, ai.host)
+			profileDirectory(activity, ai, ai.apiHost)
 		}
 	}
 	
@@ -91,7 +91,7 @@ object Action_Instance {
 	fun profileDirectoryFromInstanceInformation(
 		activity : ActMain,
 		currentColumn : Column,
-		host : String,
+		host : Host,
 		instance : TootInstance? = null
 	) {
 		profileDirectory(
@@ -105,7 +105,7 @@ object Action_Instance {
 	fun information(
 		activity : ActMain,
 		pos : Int,
-		host : String
+		host : Host
 	) {
 		activity.addColumn(
 			false,
@@ -121,20 +121,22 @@ object Action_Instance {
 	fun timelineDomain(
 		activity : ActMain,
 		pos : Int,
-		accessInfo: SavedAccount,
-		host : String
-	){
-		activity.addColumn(pos, accessInfo, ColumnType.DOMAIN_TIMELINE,host)
+		accessInfo : SavedAccount,
+		host : Host
+	) {
+		activity.addColumn(pos, accessInfo, ColumnType.DOMAIN_TIMELINE, host)
 	}
 	
 	// 指定タンスのローカルタイムラインを開く
 	fun timelineLocal(
-		activity : ActMain, pos : Int, host : String
+		activity : ActMain,
+		pos : Int,
+		host : Host
 	) {
 		// 指定タンスのアカウントを持ってるか？
 		val account_list = ArrayList<SavedAccount>()
 		for(a in SavedAccount.loadAccountList(activity)) {
-			if(host.equals(a.host, ignoreCase = true)) account_list.add(a)
+			if(a.matchHost(host)) account_list.add(a)
 		}
 		if(account_list.isEmpty()) {
 			// 持ってないなら疑似アカウントを追加する
@@ -156,41 +158,43 @@ object Action_Instance {
 	
 	// ドメインブロック
 	fun blockDomain(
-		activity : ActMain, access_info : SavedAccount, domain : String, bBlock : Boolean
+		activity : ActMain,
+		access_info : SavedAccount,
+		domain : Host,
+		bBlock : Boolean
 	) {
 		
-		if(access_info.host.equals(domain, ignoreCase = true)) {
-			showToast(activity, false, R.string.it_is_you)
+		if(access_info.matchHost(domain)) {
+			activity.showToast(false, R.string.it_is_you)
 			return
 		}
 		
 		TootTaskRunner(activity).run(access_info, object : TootTask {
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				return client.request(
 					"/api/v1/domain_blocks",
-					"domain=${domain.encodePercent()}"
+					"domain=${domain.ascii.encodePercent()}"
 						.toFormRequestBody()
 						.toRequest(if(bBlock) "POST" else "DELETE")
 				)
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				if(result == null) return  // cancelled.
 				
 				if(result.jsonObject != null) {
 					
-					for(column in App1.getAppState(activity).column_list) {
+					for(column in activity.app_state.columnList) {
 						column.onDomainBlockChanged(access_info, domain, bBlock)
 					}
 					
-					showToast(
-						activity,
+					activity.showToast(
 						false,
 						if(bBlock) R.string.block_succeeded else R.string.unblock_succeeded
 					)
 					
 				} else {
-					showToast(activity, false, result.error)
+					activity.showToast(false, result.error)
 				}
 			}
 		})
@@ -216,19 +220,19 @@ object Action_Instance {
 	) {
 		TootTaskRunner(activity).run(access_info, object : TootTask {
 			var localStatus : TootStatus? = null
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				val (result, localStatus) = client.syncStatus(access_info, status)
 				this.localStatus = localStatus
 				return result
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				result ?: return
 				val localStatus = this.localStatus
 				if(localStatus != null) {
 					timelinePublicAround2(activity, access_info, pos, localStatus.id, type)
 				} else {
-					showToast(activity, true, result.error)
+					activity.showToast(true, result.error)
 				}
 			}
 		})
@@ -239,12 +243,12 @@ object Action_Instance {
 		activity : ActMain,
 		access_info : SavedAccount,
 		pos : Int,
-		host : String?,
+		host : Host?,
 		status : TootStatus?,
 		type : ColumnType,
 		allowPseudo : Boolean = true
 	) {
-		if(host?.isEmpty() != false || host == "?") return
+		host?.valid() ?: return
 		status ?: return
 		
 		// 利用可能なアカウントを列挙する
@@ -260,7 +264,7 @@ object Action_Instance {
 				a.isMisskey -> continue@label
 				
 				// 閲覧アカウントとホスト名が同じならステータスIDの変換が必要ない
-				a.host.equals(access_info.host, ignoreCase = true) -> {
+				a.matchHost(access_info) -> {
 					if(! allowPseudo && a.isPseudo) continue@label
 					account_list1.add(a)
 				}
@@ -282,7 +286,7 @@ object Action_Instance {
 				message = "select account to read timeline",
 				accountListArg = account_list1
 			) { ai ->
-				if(! ai.isNA && ai.host.equals(access_info.host, ignoreCase = true)) {
+				if(! ai.isNA && ai.matchHost(access_info)) {
 					timelinePublicAround2(activity, ai, pos, status.id, type)
 				} else {
 					timelinePublicAround3(activity, ai, pos, status, type)
@@ -291,7 +295,7 @@ object Action_Instance {
 			return
 		}
 		
-		showToast(activity, false, R.string.missing_available_account)
+		activity.showToast(false, R.string.missing_available_account)
 	}
 	
 }

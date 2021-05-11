@@ -3,8 +3,8 @@ package jp.juggler.subwaytooter
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
-import android.os.AsyncTask
 import android.os.Bundle
+import android.os.PersistableBundle
 import android.os.Process
 import android.text.Editable
 import android.text.TextWatcher
@@ -12,23 +12,20 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import jp.juggler.subwaytooter.api.entity.TootStatus
 import jp.juggler.subwaytooter.dialog.ActionsDialog
-import jp.juggler.subwaytooter.dialog.ProgressDialogEx
+import jp.juggler.subwaytooter.util.AsyncActivity
 import jp.juggler.util.*
 import org.apache.commons.io.IOUtils
 import org.jetbrains.anko.textColor
-import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.*
 import kotlin.collections.ArrayList
 
-class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
-	
+class ActLanguageFilter : AsyncActivity(), View.OnClickListener {
 	
 	private class MyItem(
 		val code : String,
@@ -36,9 +33,11 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 	)
 	
 	companion object {
+		
 		internal val log = LogCategory("ActLanguageFilter")
 		
 		internal const val EXTRA_COLUMN_INDEX = "column_index"
+		private const val STATE_LANGUAGE_LIST = "language_list"
 		
 		fun open(activity : ActMain, idx : Int, request_code : Int) {
 			val intent = Intent(activity, ActLanguageFilter::class.java)
@@ -60,6 +59,19 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 			}
 		}
 		
+		private fun equalsLanguageList(a : JsonObject?, b : JsonObject?) : Boolean {
+			fun JsonObject.encodeToString() : String {
+				val clone = this.toString().decodeJsonObject()
+				if(! clone.contains(TootStatus.LANGUAGE_CODE_DEFAULT)) {
+					clone[TootStatus.LANGUAGE_CODE_DEFAULT] = true
+				}
+				return clone.keys.sorted().joinToString(",") { "$it=${this[it]}" }
+			}
+			
+			val a_sign = (a ?: JsonObject()).encodeToString()
+			val b_sign = (b ?: JsonObject()).encodeToString()
+			return a_sign == b_sign
+		}
 	}
 	
 	private val languageNameMap by lazy {
@@ -95,6 +107,7 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 			put(TootStatus.LANGUAGE_CODE_DEFAULT, getString(R.string.language_code_default))
 			put(TootStatus.LANGUAGE_CODE_UNKNOWN, getString(R.string.language_code_unknown))
 		}
+		
 	}
 	
 	private fun getDesc(item : MyItem) : String {
@@ -120,9 +133,39 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 		app_state = App1.getAppState(this)
 		density = app_state.density
 		column_index = intent.getIntExtra(EXTRA_COLUMN_INDEX, 0)
-		column = app_state.column_list[column_index]
+		column = app_state.column(column_index)!!
 		
-		load(column.language_filter )
+		if(savedInstanceState != null) {
+			try {
+				val sv = savedInstanceState.getString(STATE_LANGUAGE_LIST, null)
+				if(sv != null) {
+					val list = sv.decodeJsonObject()
+					load(list)
+					return
+				}
+			} catch(ex : Throwable) {
+				log.trace(ex)
+			}
+		}
+		load(column.language_filter)
+	}
+	
+	override fun onSaveInstanceState(outState : Bundle, outPersistentState : PersistableBundle) {
+		super.onSaveInstanceState(outState, outPersistentState)
+		outState.putString(STATE_LANGUAGE_LIST, encodeLanguageList().toString())
+	}
+	
+	override fun onBackPressed() {
+		if(! equalsLanguageList(column.language_filter, encodeLanguageList())) {
+			AlertDialog.Builder(this)
+				.setMessage(R.string.language_filter_quit_waring)
+				.setPositiveButton(R.string.ok) { _, _ -> finish() }
+				.setNegativeButton(R.string.cancel, null)
+				.show()
+			return
+		}
+		
+		super.onBackPressed()
 	}
 	
 	private fun initUI() {
@@ -144,21 +187,30 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 		listView.onItemClickListener = adapter
 	}
 	
-	private fun load(src : JSONObject?) {
+	// UIのデータをJsonObjectにエンコード
+	private fun encodeLanguageList() = jsonObject {
+		for(item in languageList) {
+			put(item.code, item.allow)
+		}
+	}
+	
+	private fun load(src : JsonObject?) {
 		loading_busy = true
 		try {
-			
 			languageList.clear()
-			if(src !=null) {
-				for(key in src.keys()) {
-					languageList.add(MyItem(key, src.parseBoolean(key) ?: true))
+			
+			if(src != null) {
+				for(key in src.keys) {
+					languageList.add(MyItem(key, src.boolean(key) ?: true))
 				}
 			}
+			
 			if(null == languageList.find { it.code == TootStatus.LANGUAGE_CODE_DEFAULT }) {
 				languageList.add(MyItem(TootStatus.LANGUAGE_CODE_DEFAULT, true))
 			}
 			
 			languageList.sortWith(languageComparator)
+			
 			adapter.notifyDataSetChanged()
 		} finally {
 			loading_busy = false
@@ -166,11 +218,7 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 	}
 	
 	private fun save() {
-		val dst = JSONObject()
-		for(item in languageList) {
-			dst.put(item.code, item.allow)
-		}
-		column.language_filter = dst
+		column.language_filter = encodeLanguageList()
 	}
 	
 	private inner class MyAdapter : BaseAdapter(), AdapterView.OnItemClickListener {
@@ -192,8 +240,8 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 				getDesc(item),
 				getString(if(item.allow) R.string.language_show else R.string.language_hide)
 			)
-			tv.textColor = getAttributeColor(
-				this@ActLanguageFilter, when(item.allow) {
+			tv.textColor = attrColor(
+				when(item.allow) {
 					true -> R.attr.colorContentText
 					false -> R.attr.colorRegexFilterError
 				}
@@ -263,6 +311,7 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 	private object DlgLanguageFilter {
 		
 		interface Callback {
+			
 			fun onOK(code : String, allow : Boolean)
 			fun onDelete(code : String)
 		}
@@ -321,7 +370,12 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 			if(item != null) {
 				etLanguage.isEnabled = false
 				btnPresets.isEnabled = false
-				btnPresets.setEnabledColor(activity,R.drawable.ic_edit, getAttributeColor(activity,R.attr.colorVectorDrawable),false)
+				btnPresets.setEnabledColor(
+					activity,
+					R.drawable.ic_edit,
+					activity.attrColor(R.attr.colorVectorDrawable),
+					false
+				)
 			}
 			
 			val builder = AlertDialog.Builder(activity)
@@ -342,93 +396,53 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 		}
 	}
 	
-	private fun export() {
-		
-		val progress = ProgressDialogEx(this)
-		
-		val data = JSONObject().apply {
-			for(item in languageList) {
-				put(item.code, item.allow)
+	@Suppress("BlockingMethodInNonBlockingContext")
+	private fun export() = runWithProgress(
+		"export language filter",
+		{
+			val data = JsonObject().apply {
+				for(item in languageList) {
+					put(item.code, item.allow)
+				}
 			}
+				.toString()
+				.encodeUTF8()
+			
+			val cache_dir = cacheDir
+			cache_dir.mkdir()
+			
+			val file = File(
+				cache_dir,
+				"SubwayTooter-language-filter.${Process.myPid()}.${Process.myTid()}.json"
+			)
+			FileOutputStream(file).use {
+				it.write(data)
+			}
+			file
+		},
+		{
+			val uri = FileProvider.getUriForFile(
+				this@ActLanguageFilter,
+				App1.FILE_PROVIDER_AUTHORITY,
+				it
+			)
+			val intent = Intent(Intent.ACTION_SEND)
+			intent.type = contentResolver.getType(uri)
+			intent.putExtra(Intent.EXTRA_SUBJECT, "SubwayTooter language filter data")
+			intent.putExtra(Intent.EXTRA_STREAM, uri)
+			
+			intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+			startActivityForResult(intent, REQUEST_CODE_OTHER)
 		}
-			.toString()
-			.encodeUTF8()
-		
-		val task = @SuppressLint("StaticFieldLeak")
-		object : AsyncTask<Void, String, File?>() {
-			
-			override fun doInBackground(vararg params : Void) : File? {
-				
-				try {
-					val cache_dir = cacheDir
-					cache_dir.mkdir()
-					
-					val file = File(
-						cache_dir,
-						"SubwayTooter-language-filter.${Process.myPid()}.${Process.myTid()}.json"
-					)
-					FileOutputStream(file).use { it.write(data) }
-					return file
-				} catch(ex : Throwable) {
-					log.trace(ex)
-					showToast(
-						this@ActLanguageFilter,
-						ex,
-						"can't save filter data to temporary file."
-					)
-				}
-				
-				return null
-			}
-			
-			override fun onCancelled(result : File?) {
-				onPostExecute(result)
-			}
-			
-			override fun onPostExecute(result : File?) {
-				progress.dismissSafe()
-				
-				if(isCancelled || result == null) {
-					// cancelled.
-					return
-				}
-				
-				try {
-					val uri = FileProvider.getUriForFile(
-						this@ActLanguageFilter,
-						App1.FILE_PROVIDER_AUTHORITY,
-						result
-					)
-					val intent = Intent(Intent.ACTION_SEND)
-					intent.type = contentResolver.getType(uri)
-					intent.putExtra(Intent.EXTRA_SUBJECT, "SubwayTooter language filter data")
-					intent.putExtra(Intent.EXTRA_STREAM, uri)
-					
-					intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-					startActivityForResult(intent, REQUEST_CODE_OTHER)
-				} catch(ex : Throwable) {
-					log.trace(ex)
-					showToast(this@ActLanguageFilter, ex, "export failed.")
-				}
-				
-			}
-		}
-		
-		progress.isIndeterminateEx = true
-		progress.setCancelable(true)
-		progress.setOnCancelListener { task.cancel(true) }
-		progress.show()
-		task.executeOnExecutor(App1.task_executor)
-	}
+	)
 	
 	private fun import() {
 		try {
 			val intent = intentOpenDocument("*/*")
 			startActivityForResult(intent, REQUEST_CODE_IMPORT)
 		} catch(ex : Throwable) {
-			showToast(this, ex, "import failed.")
+			showToast(ex, "import failed.")
 		}
-		
 	}
 	
 	override fun onActivityResult(requestCode : Int, resultCode : Int, data : Intent?) {
@@ -440,53 +454,23 @@ class ActLanguageFilter : AppCompatActivity(), View.OnClickListener {
 		super.onActivityResult(requestCode, resultCode, data)
 	}
 	
-	private fun import2(uri : Uri) {
-		
-		val type = contentResolver.getType(uri)
-		log.d("import2 type=%s", type)
-		
-		val progress = ProgressDialogEx(this)
-		
-		val task = @SuppressLint("StaticFieldLeak")
-		object : AsyncTask<Void, String, JSONObject?>() {
-			
-			override fun doInBackground(vararg params : Void) : JSONObject? {
-				try {
-					val source = contentResolver.openInputStream(uri)
-					if(source == null) {
-						showToast(this@ActLanguageFilter, true, "openInputStream failed.")
-						return null
-					}
-					return source.use { inStream ->
-						val bao = ByteArrayOutputStream()
-						IOUtils.copy(inStream, bao)
-						JSONObject(bao.toByteArray().decodeUTF8())
-					}
-				} catch(ex : Throwable) {
-					log.trace(ex)
-					showToast(this@ActLanguageFilter, ex, "can't load filter data.")
-					return null
+	@Suppress("BlockingMethodInNonBlockingContext")
+	private fun import2(uri : Uri) = runWithProgress(
+		"import language filter",
+		{
+			log.d("import2 type=${contentResolver.getType(uri)}")
+			val source = contentResolver.openInputStream(uri)
+			if(source == null) {
+				showToast(true, "openInputStream failed.")
+				null
+			} else {
+				source.use { inStream ->
+					val bao = ByteArrayOutputStream()
+					IOUtils.copy(inStream, bao)
+					bao.toByteArray().decodeUTF8().decodeJsonObject()
 				}
 			}
-			
-			override fun onCancelled(result : JSONObject?) {
-				onPostExecute(result)
-			}
-			
-			override fun onPostExecute(result : JSONObject?) {
-				progress.dismissSafe()
-				
-				// cancelled.
-				if(isCancelled || result == null) return
-				
-				load(result)
-			}
-		}
-		
-		progress.isIndeterminateEx = true
-		progress.setCancelable(true)
-		progress.setOnCancelListener { task.cancel(true) }
-		progress.show()
-		task.executeOnExecutor(App1.task_executor)
-	}
+		},
+		{ if(it != null) load(it) }
+	)
 }

@@ -5,7 +5,9 @@ use warnings;
 use File::Find;
 use XML::Simple;
 use Data::Dump qw(dump);
+use utf8;
 
+binmode $_ for \*STDOUT,\*STDERR;
 
 
 sub cmd($){
@@ -28,7 +30,7 @@ open(my $fh,"-|","git status --porcelain --branch")
 
 my @untrackedFiles;
 while(<$fh>){
-	chomp;
+	s/[\x0d\x0a]+//;
 	if(/^\?\?\s*(\S+)/){
 		my $path =$1;
 		next if $path =~ /\.idea|_Emoji/;
@@ -36,8 +38,8 @@ while(<$fh>){
 	}elsif( /^##\s*(\S+?)(?:\.\.|$)/ ){
 		my $branch=$1;
 		print "# branch=$branch\n";
-		$branch eq 'master'
-			or die "current branch is not master.\n";
+		$branch eq 'trunk'
+			or warn "!!!! current branch is not trunk !!!!\n";
 #	}else{
 #		warn "working tree is not clean.\n";
 #		cmd "git status";
@@ -56,7 +58,7 @@ close($fh)
 
 my $xml = XML::Simple->new;
 
-my $master_name = "_master";
+my $default_name = "_default";
 
 my @files;
 
@@ -73,7 +75,7 @@ for my $file(@files){
 	if( $file =~ m|values-([^/]+)| ){
 		$lang = $1;
 	}else{
-		$lang=$master_name;
+		$lang=$default_name;
 	}
 	my $data = $xml->XMLin($file);
 	if( not $data->{string} or ($data->{string}{content} and not ref $data->{string}{content} )){
@@ -94,7 +96,7 @@ for my $file(@files){
 
 my $hasError = 0;
 
-my $master = $langs{ $master_name };
+my $master = $langs{ $default_name };
 $master or die "missing master languages.\n";
 my %params;
 while(my($name,$value)=each %$master){
@@ -123,7 +125,9 @@ for my $lang ( sort keys %langs ){
 		# 残りの部分に%が登場したらエラー
 		my $sv = $value;
 		$sv =~ s/(%\d+\$[\d\.]*[sdxf])//g;
-		if( $sv =~ /%/ && not $sv=~/:%/ ){
+		# Unit:%. を除外したい
+		$sv =~ s/%[\s.。]//g;
+		if( $sv =~ /%/  ){
 			$hasError =1;
 			print "!! ($lang)$name : broken param: $sv // $value\n";
 		}
@@ -147,8 +151,9 @@ $hasError and die "please fix error(s).\n";
 
 # Weblateの未マージのブランチがあるか調べる
 system qq(git fetch weblate -q);
-my @list = `git branch -a --no-merged`;
+my @list = `git branch -r --no-merged`;
 for(@list){
+	s/[\x0d\x0a]+//;
 	print "# Unmerged branch: $_\n";
 }
 

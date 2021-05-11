@@ -2,10 +2,11 @@ package jp.juggler.util
 
 import android.content.Context
 import android.widget.Toast
-import java.lang.ref.WeakReference
 import me.drakeet.support.toast.ToastCompat
+import java.lang.ref.WeakReference
 
 object ToastUtils {
+	
 	private val log = LogCategory("ToastUtils")
 	private var refToast : WeakReference<Toast>? = null
 	
@@ -25,7 +26,7 @@ object ToastUtils {
 			try {
 				val duration = if(bLong) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
 				val t = ToastCompat.makeText(context, message, duration)
-				t.setBadTokenListener {}
+				t.setBadTokenListener { }
 				t.show()
 				refToast = WeakReference(t)
 			} catch(ex : Throwable) {
@@ -44,19 +45,19 @@ object ToastUtils {
 	
 }
 
-fun showToast(context : Context, bLong : Boolean, fmt : String?, vararg args : Any) {
+fun Context.showToast(bLong : Boolean, fmt : String?, vararg args : Any) {
 	val msg = if(fmt == null) "(null)" else if(args.isEmpty()) fmt else String.format(fmt, *args)
-	ToastUtils.showToastImpl(context, bLong, msg)
+	ToastUtils.showToastImpl(this, bLong, msg)
 }
 
-fun showToast(context : Context, ex : Throwable, fmt : String?, vararg args : Any) {
-	ToastUtils.showToastImpl(context, true, ex.withCaption(fmt, *args))
+fun Context.showToast(ex : Throwable, fmt : String?, vararg args : Any) {
+	ToastUtils.showToastImpl(this, true, ex.withCaption(fmt, *args))
 }
 
-fun showToast(context : Context, bLong : Boolean, string_id : Int, vararg args : Any) {
-	ToastUtils.showToastImpl(context, bLong, context.getString(string_id, *args))
+fun Context.showToast(bLong : Boolean, string_id : Int, vararg args : Any) {
+	ToastUtils.showToastImpl(this, bLong, getString(string_id, *args))
 }
 
-fun showToast(context : Context, ex : Throwable, string_id : Int, vararg args : Any) {
-	ToastUtils.showToastImpl(context, true, ex.withCaption(context.resources, string_id, *args))
+fun Context.showToast(ex : Throwable, string_id : Int, vararg args : Any) {
+	ToastUtils.showToastImpl(this, true, ex.withCaption(resources, string_id, *args))
 }

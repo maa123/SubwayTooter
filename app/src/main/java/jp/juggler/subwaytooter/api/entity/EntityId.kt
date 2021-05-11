@@ -4,26 +4,23 @@ import android.content.ContentValues
 import android.content.Intent
 import android.database.Cursor
 import android.os.Bundle
+import jp.juggler.util.JsonObject
 import jp.juggler.util.getStringOrNull
 import jp.juggler.util.notZero
-import org.json.JSONObject
 
-class EntityId(
-	val x : String,
-	val fromTime: Boolean = false
-) : Comparable<EntityId> {
+class EntityId(val x : String) : Comparable<EntityId> {
 	
 	companion object {
-
+		
 		// IDのパース失敗時にエラー扱いしたくない場合に使われる
 		internal val DEFAULT = EntityId("<>default")
 		
 		// マストドンのアカウント作成APIで作成した直後は「IDが発行されてない」状態になる
 		internal val CONFIRMING = EntityId("<>confirming")
+
+		fun mayDefault(x : String?) = if(x == null) DEFAULT else EntityId(x)
 		
-		fun mayDefault(x : String?) = if(x==null) DEFAULT else EntityId(x)
-		
-		fun mayNull(x : String?) = if(x==null) null else EntityId(x)
+		fun mayNull(x : String?) = if(x == null) null else EntityId(x)
 		
 		fun String.decode() : EntityId? {
 			if(this.isEmpty()) return null
@@ -39,14 +36,15 @@ class EntityId(
 			bundle?.getString(key)?.decode()
 		
 		// 内部保存データのデコード用。APIレスポンスのパースに使ってはいけない
-		fun from(data : JSONObject?, key : String) : EntityId? {
-			val o = data?.opt(key)
+		fun from(data : JsonObject?, key : String) : EntityId? {
+			val o = data?.get(key)
 			if(o is Long) return EntityId(o.toString())
 			return (o as? String)?.decode()
 		}
 		
 		fun from(cursor : Cursor, key : String) =
 			cursor.getStringOrNull(key)?.decode()
+
 	}
 	
 	private fun encode() : String {
@@ -58,7 +56,9 @@ class EntityId(
 	
 	fun putTo(bundle : Bundle, key : String) = bundle.putString(key, encode())
 	
-	fun putTo(data : JSONObject, key : String) : JSONObject = data.put(key, encode())
+	fun putTo(data : JsonObject, key : String) = data.apply {
+		put(key, encode())
+	}
 	
 	fun putTo(cv : ContentValues, key : String) {
 		cv.put(key, encode())
@@ -69,6 +69,9 @@ class EntityId(
 	
 	val notDefault : Boolean
 		get() = this != DEFAULT
+
+	val notDefaultOrConfirming : Boolean
+		get() = this != DEFAULT && this != CONFIRMING
 	
 	override fun compareTo(other : EntityId) : Int =
 		(x.length - other.x.length).notZero() ?: x.compareTo(other.x)
@@ -82,7 +85,6 @@ class EntityId(
 	override fun hashCode() = x.hashCode()
 	
 	override fun toString() = x
-	
 	
 	fun isNewerThan(previous : EntityId?) = when(previous) {
 		null -> true

@@ -24,29 +24,18 @@ object CharacterGroup {
 	
 	private val mapWhitespace = SparseBooleanArray().apply {
 		intArrayOf(
-			0x0009 // HORIZONTAL TABULATION
-			,
-			0x000A // LINE FEED
-			,
-			0x000B // VERTICAL TABULATION
-			,
-			0x000C // FORM FEED
-			,
-			0x000D // CARRIAGE RETURN
-			,
-			0x001C // FILE SEPARATOR
-			,
-			0x001D // GROUP SEPARATOR
-			,
-			0x001E // RECORD SEPARATOR
-			,
-			0x001F // UNIT SEPARATOR
-			,
+			0x0009, // HORIZONTAL TABULATION
+			0x000A, // LINE FEED
+			0x000B, // VERTICAL TABULATION
+			0x000C, // FORM FEED
+			0x000D, // CARRIAGE RETURN
+			0x001C, // FILE SEPARATOR
+			0x001D, // GROUP SEPARATOR
+			0x001E, // RECORD SEPARATOR
+			0x001F, // UNIT SEPARATOR
 			0x0020,
-			0x0085 // next line (latin-1)
-			,
-			0x00A0 //非区切りスペース
-			,
+			0x0085, // next line (latin-1)
+			0x00A0, //非区切りスペース
 			0x1680,
 			0x180E,
 			0x2000,
@@ -56,20 +45,16 @@ object CharacterGroup {
 			0x2004,
 			0x2005,
 			0x2006,
-			0x2007 //非区切りスペース
-			,
+			0x2007, //非区切りスペース
 			0x2008,
 			0x2009,
 			0x200A,
 			0x200B,
 			0x200C,
 			0x200D,
-			0x2028 // line separator
-			,
-			0x2029 // paragraph separator
-			,
-			0x202F //非区切りスペース
-			,
+			0x2028, // line separator
+			0x2029, // paragraph separator
+			0x202F, //非区切りスペース
 			0x205F,
 			0x2060,
 			0x3000,
@@ -84,18 +69,30 @@ object CharacterGroup {
 	fun isWhitespace(cp : Int) : Boolean = mapWhitespace.get(cp, false)
 	
 	internal val reWhitespace by lazy {
-		Pattern.compile(
+		val quotedKeys = Pattern.quote(
 			StringBuilder().apply {
-				append("[\\s\\t\\x0d\\x0a")
-				for(i in 0 until mapWhitespace.size()) {
-					val k = mapWhitespace.keyAt(i)
-					if(k > 0x20) append(k.toChar())
+				val size = mapWhitespace.size()
+				ensureCapacity(size)
+				for(i in 0 until size) {
+					append(mapWhitespace.keyAt(i).toChar())
 				}
-				append("]+")
 			}.toString()
 		)
+		"[${quotedKeys}]+".asciiPattern()
 	}
-	
+	internal val reNotWhitespace by lazy {
+		val quotedKeys = Pattern.quote(
+			StringBuilder().apply {
+				val size = mapWhitespace.size()
+				ensureCapacity(size)
+				for(i in 0 until size) {
+					append(mapWhitespace.keyAt(i).toChar())
+				}
+			}.toString()
+		)
+		"[^${quotedKeys}]+".asciiPattern()
+	}
+
 	private fun SparseBooleanArray.keys() = (0 until size()).map { keyAt(it) }
 	
 	internal val reWhitespaceBeforeLineFeed by lazy {
@@ -103,7 +100,7 @@ object CharacterGroup {
 			.map { it.toChar() }
 			.filter { it != '\n' }
 			.joinToString("")
-		Pattern.compile("[${whitespaces}]+\n")
+		"[${whitespaces}]+\n".asciiPattern()
 	}
 	
 	// 文字列のリストからグループIDを決定する
@@ -112,7 +109,7 @@ object CharacterGroup {
 		var id = Integer.MAX_VALUE
 		for(s in list) {
 			if(s.length == 1) {
-				val c = s[0].toInt()
+				val c = s[0].code
 				if(c < id) id = c
 			}
 		}
@@ -133,7 +130,7 @@ object CharacterGroup {
 	// ユニコード文字を正規化する。
 	// 簡易版なので全ての文字には対応していない
 	fun getUnifiedCharacter(c : Char) : Char {
-		val v1 = map1[c.toInt()]
+		val v1 = map1[c.code]
 		return if(v1 != 0) v1.toChar() else c
 	}
 	
@@ -148,13 +145,13 @@ object CharacterGroup {
 			val map : SparseIntArray
 			val key : Int
 			
-			val v1 = s[0].toInt()
+			val v1 = s[0].code
 			if(s.length == 1) {
 				map = map1
 				key = v1
 			} else {
 				map = map2
-				val v2 = s[1].toInt()
+				val v2 = s[1].code
 				key = v1 or (v2 shl 16)
 			}
 			
@@ -186,7 +183,7 @@ object CharacterGroup {
 			var pos = offset
 			
 			// 空白を読み飛ばす
-			while(pos < end && isWhitespace(text[pos].toInt())) ++ pos
+			while(pos < end && isWhitespace(text[pos].code)) ++ pos
 			
 			// 終端までの文字数
 			val remain = end - pos
@@ -196,7 +193,7 @@ object CharacterGroup {
 				return END
 			}
 			
-			val v1 = text[pos].toInt()
+			val v1 = text[pos].code
 			
 			// グループに登録された文字を長い順にチェック
 			var check_len = if(remain > 2) 2 else remain
@@ -204,7 +201,7 @@ object CharacterGroup {
 				val group_id = if(check_len == 1)
 					map1.get(v1)
 				else
-					map2.get(v1 or (text[pos + 1].toInt() shl 16))
+					map2.get(v1 or (text[pos + 1].code shl 16))
 				if(group_id != 0) {
 					this.offset = pos + check_len
 					return group_id

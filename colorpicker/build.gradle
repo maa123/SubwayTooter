@@ -1,7 +1,12 @@
 apply plugin: 'com.android.library'
 
 android {
-  compileSdkVersion target_sdk_version
+  compileSdkVersion compile_sdk_version
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
 
   defaultConfig {
     targetSdkVersion target_sdk_version
@@ -19,7 +24,7 @@ android {
 dependencies {
   implementation "androidx.appcompat:appcompat:$appcompat_version"
 
-  implementation 'com.google.android:flexbox:1.1.0'
+  implementation 'com.google.android:flexbox:2.0.1'
 
 }
 

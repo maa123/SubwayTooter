@@ -15,14 +15,11 @@ import jp.juggler.subwaytooter.api.entity.EntityId
 import jp.juggler.subwaytooter.table.*
 import jp.juggler.util.*
 import org.apache.commons.io.IOUtils
-import org.json.JSONException
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.*
-import java.util.regex.Pattern
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -42,84 +39,65 @@ object AppDataExporter {
 	// v3.4.5で廃止 private const val KEY_CLIENT_INFO = "client_info2"
 	private const val KEY_HIGHLIGHT_WORD = "highlight_word"
 	
-	@Throws(IOException::class, JSONException::class)
-	private fun writeJSONObject(writer : JsonWriter, src : JSONObject) {
-		writer.beginObject()
-		val it = src.keys()
-		while(it.hasNext()) {
-			val k = it.next()
-			if(src.isNull(k)) {
-				writer.name(k)
-				writer.nullValue()
-			} else {
-				when(val o = src.get(k)) {
-					is String -> {
-						writer.name(k)
-						writer.value(o)
-						
-					}
-					
-					is Boolean -> {
-						writer.name(k)
-						writer.value(o)
-						
-					}
-					
-					is Number -> {
-						
-						writer.name(k)
-						writer.value(o)
-						
-					}
-					
-					is EntityId -> {
-						writer.name(k)
-						writer.value(o.toString())
-					}
-					
-					else -> throw RuntimeException(
-						String.format(
-							Locale.JAPAN,
-							"bad data type: JSONObject key =%s",
-							k
-						)
-					)
+	@Throws(IOException::class, JsonException::class)
+	private fun JsonWriter.writeJsonValue(v : Any?) {
+		when(v) {
+			null -> nullValue()
+			is String -> value(v)
+			is Boolean -> value(v)
+			is Number -> value(v)
+			is EntityId -> value(v.toString())
+			
+			is JsonObject -> {
+				beginObject()
+				for(entry in v.entries) {
+					name(entry.key)
+					writeJsonValue(entry.value)
 				}
+				endObject()
 			}
+			
+			is JsonArray -> {
+				beginArray()
+				for(value in v) {
+					writeJsonValue(v)
+				}
+				endArray()
+			}
+			
+			else -> throw RuntimeException("writeJsonValue: bad value type: $v")
 		}
-		writer.endObject()
 	}
 	
-	@Throws(IOException::class, JSONException::class)
-	private fun readJsonObject(reader : JsonReader) : JSONObject {
-		val dst = JSONObject()
-		
-		reader.beginObject()
-		while(reader.hasNext()) {
-			val name = reader.nextName()
-			when(val token = reader.peek()) {
-				
-				JsonToken.NULL -> reader.nextNull()
-				
-				JsonToken.STRING -> dst.put(name, reader.nextString())
-				
-				JsonToken.BOOLEAN -> dst.put(name, reader.nextBoolean())
-				
-				JsonToken.NUMBER -> dst.put(name, reader.nextDouble())
-				
-				else -> throw RuntimeException(
-					String.format(
-						Locale.JAPAN,
-						"bad data type: %s key =%s",
-						token,
-						name
-					)
-				)
+	@Throws(IOException::class, JsonException::class)
+	private fun JsonReader.readJsonValue() : Any? {
+		return when(peek()) {
+			JsonToken.NULL -> {
+				nextNull()
+				null
 			}
+			
+			JsonToken.STRING -> nextString()
+			JsonToken.BOOLEAN -> nextBoolean()
+			JsonToken.NUMBER -> nextDouble()
+			JsonToken.BEGIN_OBJECT -> jsonObject {
+				beginObject()
+				while(hasNext()) {
+					val name = nextName()
+					val value = readJsonValue()
+					put(name, value)
+				}
+				endObject()
+			}
+			JsonToken.BEGIN_ARRAY -> jsonArray {
+				beginArray()
+				while(hasNext()) {
+					add(readJsonValue())
+				}
+				endArray()
+			}
+			else -> null
 		}
-		reader.endObject()
-		
-		return dst
 	}
 	
 	@Throws(IOException::class)
@@ -219,7 +197,7 @@ object AppDataExporter {
 						}
 					}
 					
-					when( reader.peek() ) {
+					when(reader.peek()) {
 						JsonToken.NULL -> {
 							reader.skipValue()
 							cv.putNull(name)
@@ -259,6 +237,7 @@ object AppDataExporter {
 	
 	@Throws(IOException::class)
 	private fun writePref(writer : JsonWriter, pref : SharedPreferences) {
+		writer.name(KEY_PREF)
 		writer.beginObject()
 		for((k, v) in pref.all) {
 			writer.name(k)
@@ -271,13 +250,7 @@ object AppDataExporter {
 					(v is Float && v.isNaN()) -> writer.value(MAGIC_NAN)
 					else -> writer.value(v)
 				}
-				else -> throw RuntimeException(
-					String.format(
-						Locale.JAPAN,
-						"writePref. bad data type: Preference key =%s",
-						k
-					)
-				)
+				else -> error("writePref: bad data type. key=$k, type=${v.javaClass.simpleName}")
 			}
 		}
 		writer.endObject()
@@ -325,38 +298,37 @@ object AppDataExporter {
 		e.apply()
 	}
 	
-	@Throws(IOException::class, JSONException::class)
+	@Throws(IOException::class, JsonException::class)
 	private fun writeColumn(app_state : AppState, writer : JsonWriter) {
+		writer.name(KEY_COLUMN)
 		writer.beginArray()
-		for(column in app_state.column_list) {
-			val dst = JSONObject()
-			column.encodeJSON(dst, 0)
-			writeJSONObject(writer, dst)
+		for(column in app_state.columnList) {
+			writer.writeJsonValue(jsonObject { column.encodeJSON(this, 0) })
 		}
 		writer.endArray()
 	}
 	
-	@Throws(IOException::class, JSONException::class)
+	@Throws(IOException::class, JsonException::class)
 	private fun readColumn(
 		app_state : AppState,
 		reader : JsonReader,
 		id_map : HashMap<Long, Long>
-	) : ArrayList<Column> {
-		val result = ArrayList<Column>()
+	) = ArrayList<Column>().also{ result->
 		reader.beginArray()
 		while(reader.hasNext()) {
-			val item = readJsonObject(reader)
+			val item :JsonObject = reader.readJsonValue().cast() !!
 			
-			when(val old_id = item.parseLong(Column.KEY_ACCOUNT_ROW_ID) ?: - 1L) {
+			// DB上のアカウントIDが変化したので置き換える
+			when(val old_id = item.long(Column.KEY_ACCOUNT_ROW_ID) ?: - 1L) {
+				
+				// 検索カラムのアカウントIDはNAアカウントと紐ついている。変換の必要はない
 				- 1L -> {
-					// 検索カラムは NAアカウントと紐ついている。変換の必要はない
 				}
-				else -> {
-					val new_id =
-						id_map[old_id] ?: throw RuntimeException("readColumn: can't convert account id")
-					item.put(Column.KEY_ACCOUNT_ROW_ID, new_id)
-				}
+				
+				else -> item[Column.KEY_ACCOUNT_ROW_ID] = id_map[old_id]
+					?: error("readColumn: can't convert account id")
 			}
+			
 			try {
 				result.add(Column(app_state, item))
 			} catch(ex : Throwable) {
@@ -364,46 +336,33 @@ object AppDataExporter {
 				log.e(ex, "column load failed.")
 				throw ex
 			}
-			
 		}
 		reader.endArray()
-		return result
 	}
 	
-	@Throws(IOException::class, JSONException::class)
+	@Throws(IOException::class, JsonException::class)
 	fun encodeAppData(context : Context, writer : JsonWriter) {
 		writer.setIndent(" ")
 		writer.beginObject()
 		
 		val app_state = App1.getAppState(context)
-		//////////////////////////////////////
-		run {
-			writer.name(KEY_PREF)
-			writePref(writer, app_state.pref)
-		}
-		//////////////////////////////////////
+		
+		writePref(writer, app_state.pref)
+
 		writeFromTable(writer, KEY_ACCOUNT, SavedAccount.table)
 		writeFromTable(writer, KEY_ACCT_COLOR, AcctColor.table)
 		writeFromTable(writer, KEY_MUTED_APP, MutedApp.table)
 		writeFromTable(writer, KEY_MUTED_WORD, MutedWord.table)
 		writeFromTable(writer, KEY_FAV_MUTE, FavMute.table)
 		writeFromTable(writer, KEY_HIGHLIGHT_WORD, HighlightWord.table)
-		
-		// 端末間でクライアントIDを再利用することはできなくなった
-		//writeFromTable(writer, KEY_CLIENT_INFO, ClientInfo.table)
-		
-		//////////////////////////////////////
-		run {
-			writer.name(KEY_COLUMN)
-			writeColumn(app_state, writer)
-			
-		}
-		
+
+		writeColumn(app_state, writer)
+
 		writer.endObject()
 	}
 	
 	@SuppressLint("UseSparseArrays")
-	@Throws(IOException::class, JSONException::class)
+	@Throws(IOException::class, JsonException::class)
 	internal fun decodeAppData(context : Context, reader : JsonReader) : ArrayList<Column> {
 		
 		var result : ArrayList<Column>? = null
@@ -414,7 +373,7 @@ object AppDataExporter {
 		val account_id_map = HashMap<Long, Long>()
 		
 		while(reader.hasNext()) {
-			when( reader.nextName()) {
+			when(reader.nextName()) {
 				KEY_PREF -> importPref(reader, app_state.pref)
 				KEY_ACCOUNT -> importTable(reader, SavedAccount.table, account_id_map)
 				
@@ -428,11 +387,11 @@ object AppDataExporter {
 				KEY_FAV_MUTE -> importTable(reader, FavMute.table, null)
 				KEY_HIGHLIGHT_WORD -> importTable(reader, HighlightWord.table, null)
 				KEY_COLUMN -> result = readColumn(app_state, reader, account_id_map)
-
+				
 				// 端末間でクライアントIDを再利用することはできなくなった
 				// KEY_CLIENT_INFO -> importTable(reader, ClientInfo.table, null)
-
-				else-> reader.skipValue()
+				
+				else -> reader.skipValue()
 			}
 		}
 		
@@ -472,7 +431,7 @@ object AppDataExporter {
 		}
 	}
 	
-	private val reBackgroundImage = Pattern.compile("background-image/(.+)")
+	private val reBackgroundImage = "background-image/(.+)".asciiPattern()
 	
 	// エントリが背景画像のソレなら真を返す
 	// column.column_bg_image を更新する場合がある

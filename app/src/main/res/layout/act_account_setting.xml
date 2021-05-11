@@ -65,7 +65,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="4dp"
-                android:background="@drawable/btn_bg_transparent"
+                android:background="@drawable/btn_bg_transparent_round6dp"
                 android:contentDescription="@string/edit"
                 android:src="@drawable/ic_edit"
                 android:tint="?attr/colorVectorDrawable" />
@@ -155,7 +155,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="4dp"
-                android:background="@drawable/btn_bg_transparent"
+                android:background="@drawable/btn_bg_transparent_round6dp"
                 android:contentDescription="@string/post"
                 android:src="@drawable/ic_send"
                 android:tint="?attr/colorVectorDrawable" />
@@ -181,7 +181,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="4dp"
-                android:background="@drawable/btn_bg_transparent"
+                android:background="@drawable/btn_bg_transparent_round6dp"
                 android:contentDescription="@string/post"
                 android:src="@drawable/ic_send"
                 android:tint="?attr/colorVectorDrawable" />
@@ -319,7 +319,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_marginStart="4dp"
-                android:background="@drawable/btn_bg_transparent"
+                android:background="@drawable/btn_bg_transparent_round6dp"
                 android:contentDescription="@string/post"
                 android:src="@drawable/ic_send"
                 android:tint="?attr/colorVectorDrawable" />
@@ -388,7 +388,7 @@
 
         <LinearLayout style="@style/setting_row_form">
 
-            <Switch
+            <androidx.appcompat.widget.SwitchCompat
                 android:id="@+id/swMarkSensitive"
                 style="@style/setting_wrap" />
 
@@ -406,7 +406,7 @@
 
         <LinearLayout style="@style/setting_row_form">
 
-            <Switch
+            <androidx.appcompat.widget.SwitchCompat
                 android:id="@+id/swNSFWOpen"
                 style="@style/setting_wrap" />
 
@@ -424,7 +424,7 @@
 
         <LinearLayout style="@style/setting_row_form">
 
-            <Switch
+            <androidx.appcompat.widget.SwitchCompat
                 android:id="@+id/swExpandCW"
                 style="@style/setting_wrap" />
 
@@ -442,7 +442,7 @@
 
         <LinearLayout style="@style/setting_row_form">
 
-            <Switch
+            <androidx.appcompat.widget.SwitchCompat
                 android:id="@+id/swDontShowTimeout"
                 style="@style/setting_wrap" />
 
@@ -458,77 +458,45 @@
             style="@style/setting_row_label"
             android:text="@string/confirmation" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <CheckBox
+            android:id="@+id/cbConfirmFollow"
+            style="@style/setting_row_form"
+            android:text="@string/follow" />
 
-            <CheckBox
-                android:id="@+id/cbConfirmFollow"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/follow" />
+        <CheckBox
+            android:id="@+id/cbConfirmFollowLockedUser"
+            style="@style/setting_row_form"
+            android:text="@string/follow_locked_user" />
 
-        </LinearLayout>
+        <CheckBox
+            android:id="@+id/cbConfirmUnfollow"
+            style="@style/setting_row_form"
+            android:text="@string/unfollow" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <CheckBox
+            android:id="@+id/cbConfirmBoost"
+            style="@style/setting_row_form"
+            android:text="@string/boost" />
 
-            <CheckBox
-                android:id="@+id/cbConfirmFollowLockedUser"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/follow_locked_user" />
+        <CheckBox
+            android:id="@+id/cbConfirmUnboost"
+            style="@style/setting_row_form"
+            android:text="@string/unboost" />
 
-        </LinearLayout>
+        <CheckBox
+            android:id="@+id/cbConfirmFavourite"
+            style="@style/setting_row_form"
+            android:text="@string/favourite" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <CheckBox
+            android:id="@+id/cbConfirmUnfavourite"
+            style="@style/setting_row_form"
+            android:text="@string/unfavourite" />
 
-            <CheckBox
-                android:id="@+id/cbConfirmUnfollow"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/unfollow" />
-
-        </LinearLayout>
-
-        <LinearLayout style="@style/setting_row_form">
-
-            <CheckBox
-                android:id="@+id/cbConfirmBoost"
-                style="@style/setting_wrap"
-                android:text="@string/boost" />
-
-        </LinearLayout>
-
-        <LinearLayout style="@style/setting_row_form">
-
-            <CheckBox
-                android:id="@+id/cbConfirmUnboost"
-                style="@style/setting_wrap"
-                android:text="@string/unboost" />
-
-        </LinearLayout>
-
-        <LinearLayout style="@style/setting_row_form">
-
-            <CheckBox
-                android:id="@+id/cbConfirmFavourite"
-                style="@style/setting_wrap"
-                android:text="@string/favourite" />
-
-        </LinearLayout>
-
-        <LinearLayout style="@style/setting_row_form">
-
-            <CheckBox
-                android:id="@+id/cbConfirmUnfavourite"
-                style="@style/setting_wrap"
-                android:text="@string/unfavourite" />
-
-        </LinearLayout>
-
-        <LinearLayout style="@style/setting_row_form">
-
-            <CheckBox
-                android:id="@+id/cbConfirmToot"
-                style="@style/setting_wrap"
-                android:text="@string/act_post" />
-
-        </LinearLayout>
+        <CheckBox
+            android:id="@+id/cbConfirmToot"
+            style="@style/setting_row_form"
+            android:text="@string/act_post" />
 
         <View style="@style/setting_divider" />
 
@@ -536,72 +504,81 @@
             style="@style/setting_row_label"
             android:text="@string/notifications" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <CheckBox
+            android:id="@+id/cbNotificationMention"
+            style="@style/setting_row_form"
+            android:text="@string/mention2" />
 
-            <CheckBox
-                android:id="@+id/cbNotificationMention"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/mention2" />
-        </LinearLayout>
+        <CheckBox
+            android:id="@+id/cbNotificationBoost"
+            style="@style/setting_row_form"
+            android:text="@string/boost" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <CheckBox
+            android:id="@+id/cbNotificationFavourite"
+            style="@style/setting_row_form"
+            android:text="@string/favourite" />
 
-            <CheckBox
-                android:id="@+id/cbNotificationBoost"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/boost" />
-        </LinearLayout>
+        <CheckBox
+            android:id="@+id/cbNotificationFollow"
+            style="@style/setting_row_form"
+            android:text="@string/follow" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <CheckBox
+            android:id="@+id/cbNotificationFollowRequest"
+            style="@style/setting_row_form"
+            android:text="@string/follow_request" />
 
-            <CheckBox
-                android:id="@+id/cbNotificationFavourite"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/favourite" />
-        </LinearLayout>
+        <CheckBox
+            android:id="@+id/cbNotificationReaction"
+            style="@style/setting_row_form"
+            android:text="@string/reaction" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <CheckBox
+            android:id="@+id/cbNotificationVote"
+            style="@style/setting_row_form"
+            android:text="@string/vote_polls" />
 
-            <CheckBox
-                android:id="@+id/cbNotificationFollow"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/follow" />
-        </LinearLayout>
+        <CheckBox
+            android:id="@+id/cbNotificationPost"
+            style="@style/setting_row_form"
+            android:text="@string/notification_type_post" />
 
-        <LinearLayout style="@style/setting_row_form">
+        <TextView
+            style="@style/setting_row_form"
+            android:layout_marginTop="12dp"
+            android:text="@string/push_notification_filter" />
 
-            <CheckBox
-                android:id="@+id/cbNotificationFollowRequest"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/follow_request" />
-        </LinearLayout>
+        <Spinner
+            android:id="@+id/spPushPolicy"
+            style="@style/setting_row_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="40dp"
+            />
 
-        <LinearLayout style="@style/setting_row_form">
+        <Button
+            android:id="@+id/btnPushSubscription"
+            style="@style/setting_row_button"
+            android:layout_marginTop="12dp"
+            android:ellipsize="start"
+            android:text="@string/update_push_subscription"
+            android:textAllCaps="false" />
 
-            <CheckBox
-                android:id="@+id/cbNotificationReaction"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/reaction" />
-        </LinearLayout>
+        <Button
+            android:id="@+id/btnPushSubscriptionNotForce"
+            style="@style/setting_row_button"
+            android:ellipsize="start"
+            android:text="@string/update_push_subscription_not_force"
+            android:textAllCaps="false"
+            android:visibility="gone" />
 
-        <LinearLayout style="@style/setting_row_form">
-
-            <CheckBox
-                android:id="@+id/cbNotificationVote"
-                style="@style/setting_horizontal_stretch"
-                android:text="@string/vote_polls" />
-        </LinearLayout>
-
-        <LinearLayout style="@style/setting_row_form">
-
-            <Button
-                android:id="@+id/btnPushSubscription"
-                style="@style/setting_horizontal_stretch"
-                android:ellipsize="start"
-                android:text="@string/update_push_subscription"
-                android:textAllCaps="false" />
-
-        </LinearLayout>
+        <Button
+            android:id="@+id/btnResetNotificationTracking"
+            style="@style/setting_row_button"
+            android:ellipsize="start"
+            android:text="@string/reset_notification_tracking_status"
+            android:textAllCaps="false" />
 
         <View style="@style/setting_divider" />
 
@@ -656,279 +633,57 @@
             android:labelFor="@+id/etMaxTootChars"
             android:text="@string/max_toot_chars" />
 
-        <LinearLayout style="@style/setting_row_form">
-
-            <EditText
-                android:id="@+id/etMaxTootChars"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number" />
-
-        </LinearLayout>
+        <EditText
+            android:id="@+id/etMaxTootChars"
+            style="@style/setting_edit_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:inputType="number" />
 
         <View style="@style/setting_divider" />
 
-        <!--<View style="@style/setting_divider"/>-->
+        <TextView
+            style="@style/setting_row_label"
+            android:labelFor="@+id/etMediaSizeMax"
+            android:text="@string/media_attachment_max_byte_size" />
 
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:labelFor="@+id/etTargetUrl"-->
-        <!--android:text="@string/target_url"-->
-        <!--/>-->
+        <EditText
+            android:id="@+id/etMediaSizeMax"
+            style="@style/setting_edit_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:inputType="number" />
 
-        <!--<LinearLayout style="@style/setting_row_form">-->
+        <View style="@style/setting_divider" />
 
-        <!--<EditText-->
-        <!--android:id="@+id/etTargetUrl"-->
-        <!--style="@style/setting_edit_text"-->
-        <!--android:inputType="textUri"-->
-        <!--/>-->
+        <TextView
+            style="@style/setting_row_label"
+            android:labelFor="@+id/etMovieSizeMax"
+            android:text="@string/media_attachment_max_byte_size_movie" />
 
-        <!--<Button-->
-        <!--android:id="@+id/btnHelpTargetUrl"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
+        <EditText
+            android:id="@+id/etMovieSizeMax"
+            style="@style/setting_edit_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:inputType="number" />
 
-        <!--<View style="@style/setting_divider"/>-->
+        <View style="@style/setting_divider" />
 
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:text="@string/local_folder"-->
-        <!--/>-->
+        <TextView
+            style="@style/setting_row_label"
+            android:text="@string/resize_image" />
 
-        <!--<LinearLayout style="@style/setting_row_form">-->
+        <Spinner
+            android:id="@+id/spResizeImage"
+            style="@style/setting_row_button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
 
-        <!--<TextView-->
-        <!--android:id="@+id/tvFolder"-->
-        <!--style="@style/setting_horizontal_stretch"-->
-        <!--android:ellipsize="start"-->
-        <!--/>-->
+        <View style="@style/setting_divider" />
 
-        <!--<Button-->
-        <!--android:id="@+id/btnFolderPicker"-->
-        <!--android:layout_width="wrap_content"-->
-        <!--android:layout_height="wrap_content"-->
-        <!--android:minWidth="32dp"-->
-        <!--android:text="@string/dot_dot"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnHelpFolderPicker"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:labelFor="@+id/etFileType"-->
-        <!--android:text="@string/file_type"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<EditText-->
-        <!--android:id="@+id/etFileType"-->
-        <!--style="@style/setting_edit_text"-->
-        <!--android:inputType="text"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnFileTypeHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:labelFor="@+id/etRepeatInterval"-->
-        <!--android:text="@string/repeat_interval"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<EditText-->
-        <!--android:id="@+id/etRepeatInterval"-->
-        <!--style="@style/setting_edit_text"-->
-        <!--android:inputType="number"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnIntervalHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:text="@string/geo_tagging_mode"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<Spinner-->
-        <!--android:id="@+id/spLocationMode"-->
-        <!--style="@style/setting_horizontal_stretch"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnLocationModeHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:labelFor="@+id/etLocationIntervalDesired"-->
-        <!--android:text="@string/location_interval_desired"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<EditText-->
-        <!--android:id="@+id/etLocationIntervalDesired"-->
-        <!--style="@style/setting_edit_text"-->
-        <!--android:inputType="number"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnLocationIntervalDesiredHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:labelFor="@+id/etLocationIntervalMin"-->
-        <!--android:text="@string/location_interval_min"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<EditText-->
-        <!--android:id="@+id/etLocationIntervalMin"-->
-        <!--style="@style/setting_edit_text"-->
-        <!--android:inputType="number"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnLocationIntervalMinHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:text="@string/force_wifi_ap"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<Switch-->
-        <!--android:id="@+id/swForceWifi"-->
-        <!--style="@style/setting_horizontal_stretch"-->
-        <!--android:gravity="center"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnForceWifiHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:labelFor="@+id/etSSID"-->
-        <!--android:text="@string/wifi_ap_ssid"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<EditText-->
-        <!--android:id="@+id/etSSID"-->
-        <!--style="@style/setting_edit_text"-->
-        <!--android:inputType="text"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnSSIDPicker"-->
-        <!--android:layout_width="wrap_content"-->
-        <!--android:layout_height="wrap_content"-->
-        <!--android:minWidth="32dp"-->
-        <!--android:text="@string/dot_dot"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnSSIDHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:text="@string/thumbnail_auto_rotate"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<Switch-->
-        <!--android:id="@+id/swThumbnailAutoRotate"-->
-        <!--style="@style/setting_horizontal_stretch"-->
-        <!--android:gravity="center"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnThumbnailAutoRotateHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--style="@style/setting_row_label"-->
-        <!--android:text="@string/copy_before_view_send"-->
-        <!--/>-->
-
-        <!--<LinearLayout style="@style/setting_row_form">-->
-
-        <!--<Switch-->
-        <!--android:id="@+id/swCopyBeforeViewSend"-->
-        <!--style="@style/setting_horizontal_stretch"-->
-        <!--android:gravity="center"-->
-        <!--/>-->
-
-        <!--<Button-->
-        <!--android:id="@+id/btnCopyBeforeViewSendHelp"-->
-        <!--style="@style/setting_row_help"-->
-        <!--/>-->
-        <!--</LinearLayout>-->
-
-        <!--<View style="@style/setting_divider"/>-->
-
-        <!--<TextView-->
-        <!--android:layout_width="match_parent"-->
-        <!--android:layout_height="wrap_content"-->
-        <!--android:layout_marginBottom="20dp"-->
-        <!--android:layout_marginTop="20dp"-->
-        <!--android:gravity="center"-->
-        <!--android:text="@string/setting_desc"-->
-        <!--/>-->
     </LinearLayout>
 </ScrollView>

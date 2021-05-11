@@ -4,21 +4,23 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.PorterDuff
 import android.graphics.drawable.Drawable
-import androidx.core.content.ContextCompat
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
+import androidx.core.content.ContextCompat
 import jp.juggler.emoji.EmojiMap
 import jp.juggler.subwaytooter.api.entity.TootAccount
 import jp.juggler.subwaytooter.api.entity.TootVisibility
 import jp.juggler.subwaytooter.span.EmojiImageSpan
 import jp.juggler.subwaytooter.span.createSpan
 import jp.juggler.subwaytooter.table.UserRelation
-import jp.juggler.util.*
-import kotlin.coroutines.Continuation
+import jp.juggler.util.LogCategory
+import jp.juggler.util.attrColor
+import jp.juggler.util.notZero
+import jp.juggler.util.setIconDrawableId
 import kotlin.math.max
 import kotlin.math.min
 
@@ -28,7 +30,7 @@ object Styler {
 	
 	fun defaultColorIcon(context : Context, iconId : Int) : Drawable? =
 		ContextCompat.getDrawable(context, iconId)?.also {
-			it.setTint(getAttributeColor(context, R.attr.colorVectorDrawable))
+			it.setTint(context.attrColor(R.attr.colorVectorDrawable))
 			it.setTintMode(PorterDuff.Mode.SRC_IN)
 		}
 	
@@ -51,7 +53,10 @@ object Styler {
 				TootVisibility.LocalPublic -> R.drawable.ic_local_ltl
 				TootVisibility.LocalHome -> R.drawable.ic_local_home
 				TootVisibility.LocalFollowers -> R.drawable.ic_local_lock_open
-				
+
+				TootVisibility.Unknown-> R.drawable.ic_question
+				TootVisibility.Limited ->R.drawable.ic_account_circle
+				TootVisibility.Mutual -> R.drawable.ic_bidirectional
 			}
 			else -> when(visibility) {
 				TootVisibility.Public -> R.drawable.ic_public
@@ -65,7 +70,10 @@ object Styler {
 				TootVisibility.LocalPublic -> R.drawable.ic_local_ltl
 				TootVisibility.LocalHome -> R.drawable.ic_local_lock_open
 				TootVisibility.LocalFollowers -> R.drawable.ic_local_lock
-				
+
+				TootVisibility.Unknown-> R.drawable.ic_question
+				TootVisibility.Limited ->R.drawable.ic_account_circle
+				TootVisibility.Mutual -> R.drawable.ic_bidirectional
 			}
 		}
 	}
@@ -94,6 +102,10 @@ object Styler {
 					TootVisibility.LocalPublic -> R.string.visibility_local_public
 					TootVisibility.LocalHome -> R.string.visibility_local_home
 					TootVisibility.LocalFollowers -> R.string.visibility_local_followers
+
+					TootVisibility.Unknown-> R.string.visibility_unknown
+					TootVisibility.Limited ->R.string.visibility_limited
+					TootVisibility.Mutual -> R.string.visibility_mutual
 				}
 				else -> when(visibility) {
 					TootVisibility.Public -> R.string.visibility_public
@@ -107,6 +119,10 @@ object Styler {
 					TootVisibility.LocalPublic -> R.string.visibility_local_public
 					TootVisibility.LocalHome -> R.string.visibility_local_unlisted
 					TootVisibility.LocalFollowers -> R.string.visibility_local_followers
+
+					TootVisibility.Unknown-> R.string.visibility_unknown
+					TootVisibility.Limited ->R.string.visibility_limited
+					TootVisibility.Mutual -> R.string.visibility_mutual
 				}
 			}
 		)
@@ -121,7 +137,7 @@ object Styler {
 		
 		val icon_id = getVisibilityIconId(isMisskeyData, visibility)
 		val sv = getVisibilityString(context, isMisskeyData, visibility)
-		val color = getAttributeColor(context, R.attr.colorVectorDrawable)
+		val color = context.attrColor(R.attr.colorVectorDrawable)
 		val sb = SpannableStringBuilder()
 		
 		// アイコン部分
@@ -148,17 +164,21 @@ object Styler {
 	}
 	
 	fun setFollowIcon(
-		context : Context
-		, ibFollow : ImageButton
-		, ivDot : ImageView
-		, relation : UserRelation
-		, who : TootAccount
-		, defaultColor : Int
-		, alphaMultiplier : Float
+		context : Context,
+		ibFollow : ImageButton,
+		ivDot : ImageView,
+		relation : UserRelation,
+		who : TootAccount,
+		defaultColor : Int,
+		alphaMultiplier : Float
 	) {
+		fun colorAccent() =
+			Pref.ipButtonFollowingColor(context.pref()).notZero()
+				?: context.attrColor(R.attr.colorImageButtonAccent)
 		
-		fun colorError() = getAttributeColor(context, R.attr.colorRegexFilterError)
-		fun colorAccent() = getAttributeColor(context, R.attr.colorImageButtonAccent)
+		fun colorError() =
+			Pref.ipButtonFollowRequestColor(context.pref()).notZero()
+				?: context.attrColor(R.attr.colorRegexFilterError)
 		
 		// 被フォロー状態
 		when {
@@ -252,8 +272,9 @@ object Styler {
 		ibFollow.contentDescription = contentDescription
 	}
 	
-	private fun getHorizontalPadding(v : View, delta_dp : Float ) : Int {
-		val form_width_max = 420f
+	private fun getHorizontalPadding(v : View, delta_dp : Float) : Int {
+		// Essential Phone PH-1は 短辺439dp
+		val form_width_max = 460f
 		val dm = v.resources.displayMetrics
 		val screen_w = dm.widthPixels
 		val content_w = (0.5f + form_width_max * dm.density).toInt()
@@ -269,7 +290,7 @@ object Styler {
 		else -> orientation.toString()
 	}
 	
-	fun fixHorizontalPadding(v : View,delta_dp:Float = 12f) {
+	fun fixHorizontalPadding(v : View, delta_dp : Float = 12f) {
 		val pad_t = v.paddingTop
 		val pad_b = v.paddingBottom
 		
@@ -279,12 +300,12 @@ object Styler {
 			val pad_lr = (0.5f + delta_dp * dm.density).toInt()
 			when(Pref.ipJustifyWindowContentPortrait(App1.pref)) {
 				Pref.JWCP_START -> {
-					v.setPaddingRelative(pad_lr, pad_t, pad_lr+ dm.widthPixels / 2, pad_b)
+					v.setPaddingRelative(pad_lr, pad_t, pad_lr + dm.widthPixels / 2, pad_b)
 					return
 				}
 				
 				Pref.JWCP_END -> {
-					v.setPaddingRelative( pad_lr+dm.widthPixels / 2, pad_t,  pad_lr, pad_b)
+					v.setPaddingRelative(pad_lr + dm.widthPixels / 2, pad_t, pad_lr, pad_b)
 					return
 				}
 			}
@@ -294,7 +315,7 @@ object Styler {
 		v.setPaddingRelative(pad_lr, pad_t, pad_lr, pad_b)
 	}
 	
-	fun fixHorizontalPadding0(v : View)  = fixHorizontalPadding(v,0f)
+	fun fixHorizontalPadding0(v : View) = fixHorizontalPadding(v, 0f)
 	
 	fun fixHorizontalMargin(v : View) {
 		val lp = v.layoutParams
@@ -366,7 +387,7 @@ fun SpannableStringBuilder.appendMisskeyReaction(
 	val end = this.length
 	
 	this.setSpan(
-		EmojiMap.sUTF16ToEmojiResource[emojiUtf16] !!.createSpan(context),
+		EmojiMap.unicodeMap[emojiUtf16] !!.createSpan(context),
 		start, end,
 		Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
 	)

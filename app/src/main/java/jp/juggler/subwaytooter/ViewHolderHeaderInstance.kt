@@ -7,22 +7,26 @@ import android.widget.Button
 import android.widget.TextView
 import jp.juggler.subwaytooter.action.Action_Account
 import jp.juggler.subwaytooter.action.Action_Instance
+import jp.juggler.subwaytooter.api.entity.Host
 import jp.juggler.subwaytooter.api.entity.TootInstance
 import jp.juggler.subwaytooter.util.DecodeOptions
+import jp.juggler.subwaytooter.util.openBrowser
+import jp.juggler.subwaytooter.util.openCustomTab
 import jp.juggler.subwaytooter.view.MyLinkMovementMethod
 import jp.juggler.subwaytooter.view.MyNetworkImageView
 import jp.juggler.util.LogCategory
 import jp.juggler.util.neatSpaces
+import jp.juggler.util.notEmpty
 import jp.juggler.util.showToast
 import org.conscrypt.OpenSSLX509Certificate
 
 internal class ViewHolderHeaderInstance(
 	arg_activity : ActMain,
 	viewRoot : View
-) : ViewHolderHeaderBase(arg_activity, viewRoot)
-	, View.OnClickListener {
+) : ViewHolderHeaderBase(arg_activity, viewRoot), View.OnClickListener {
 	
 	companion object {
+		
 		private val log = LogCategory("ViewHolderHeaderInstance")
 		
 	}
@@ -39,6 +43,7 @@ internal class ViewHolderHeaderInstance(
 	private val ivThumbnail : MyNetworkImageView = viewRoot.findViewById(R.id.ivThumbnail)
 	private val btnContact : TextView = viewRoot.findViewById(R.id.btnContact)
 	private val tvLanguages : TextView = viewRoot.findViewById(R.id.tvLanguages)
+	private val tvInvitesEnabled : TextView = viewRoot.findViewById(R.id.tvInvitesEnabled)
 	private val tvHandshake : TextView = viewRoot.findViewById(R.id.tvHandshake)
 	
 	private val btnAbout : Button = viewRoot.findViewById(R.id.btnAbout)
@@ -90,6 +95,7 @@ internal class ViewHolderHeaderInstance(
 			tvShortDescription.text = "?"
 			ivThumbnail.setImageUrl(App1.pref, 0f, null)
 			tvLanguages.text = "?"
+			tvInvitesEnabled.text = "?"
 			btnContact.text = "?"
 			btnContact.isEnabled = false
 			btnAbout.isEnabled = false
@@ -98,7 +104,13 @@ internal class ViewHolderHeaderInstance(
 		} else {
 			val uri = instance.uri ?: ""
 			val hasUri = uri.isNotEmpty()
-			btnInstance.text = uri
+			
+			val host = Host.parse(uri)
+			btnInstance.text = if(host.ascii == host.pretty) {
+				host.pretty
+			} else {
+				"${host.pretty}\n${host.ascii}"
+			}
 			
 			btnInstance.isEnabled = hasUri
 			btnAbout.isEnabled = hasUri
@@ -113,13 +125,24 @@ internal class ViewHolderHeaderInstance(
 			btnEmail.isEnabled = email.isNotEmpty()
 			
 			val contact_acct =
-				instance.contact_account?.let { who -> "@" + who.username + "@" + who.host } ?: ""
+				instance.contact_account?.let { who -> "@${who.username}@${who.apDomain.pretty}" }
+					?: ""
 			btnContact.text = contact_acct
 			btnContact.isEnabled = contact_acct.isNotEmpty()
 			
 			tvLanguages.text = instance.languages?.joinToString(", ") ?: ""
+			tvInvitesEnabled.text = when(instance.invites_enabled) {
+				null -> "?"
+				true -> activity.getString(R.string.yes)
+				false -> activity.getString(R.string.no)
+			}
 			
-			val options = DecodeOptions(activity, access_info, decodeEmoji = true)
+			val options = DecodeOptions(
+				activity,
+				access_info,
+				decodeEmoji = true,
+				mentionDefaultHostDomain = access_info
+			)
 			
 			tvShortDescription.text = options
 				.decodeHTML("<p>${instance.short_description ?: ""}</p>")
@@ -141,13 +164,15 @@ internal class ViewHolderHeaderInstance(
 				
 			}
 			
-			val thumbnail = instance.thumbnail
-			if(thumbnail == null || thumbnail.isEmpty()) {
-				ivThumbnail.setImageUrl(App1.pref, 0f, null)
-			} else {
-				ivThumbnail.setImageUrl(App1.pref, 0f, thumbnail, thumbnail)
-			}
-			
+			val thumbnail = instance.thumbnail?.let{
+				if( it.startsWith("/")){
+					// "/instance/thumbnail.jpeg" in case of pleroma.noellabo.jp
+					"https://${host.ascii}$it"
+				}else{
+					it
+				}
+			}.notEmpty()
+			ivThumbnail.setImageUrl(App1.pref, 0f, thumbnail, thumbnail)
 		}
 		
 		tvHandshake.text = if(handshake == null) {
@@ -164,15 +189,15 @@ internal class ViewHolderHeaderInstance(
 						Certificate : ${cert.type}
 						subject : ${cert.subjectDN}
 						subjectAlternativeNames : ${
-						cert.subjectAlternativeNames
-							?.joinToString(", ") {
-								try {
-									it?.last()
-								} catch(ignored : Throwable) {
-									it
+							cert.subjectAlternativeNames
+								?.joinToString(", ") {
+									try {
+										it?.last()
+									} catch(ignored : Throwable) {
+										it
+									}
+										?.toString() ?: "null"
 								}
-									?.toString() ?: "null"
-							}
 						}
 						issuer : ${cert.issuerX500Principal}
 						end : ${cert.notAfter}
@@ -191,12 +216,13 @@ internal class ViewHolderHeaderInstance(
 	}
 	
 	override fun onClick(v : View) {
+		val host = Host.parse(column.instance_uri)
 		when(v.id) {
 			
 			R.id.btnEmail -> instance?.email?.let { email ->
 				try {
 					if(email.contains("://")) {
-						App1.openCustomTab(activity, email)
+						activity.openCustomTab(email)
 					} else {
 						val intent = Intent(Intent.ACTION_SEND)
 						intent.type = "text/plain"
@@ -207,34 +233,36 @@ internal class ViewHolderHeaderInstance(
 					
 				} catch(ex : Throwable) {
 					log.e(ex, "startActivity failed. mail=$email")
-					showToast(activity, true, R.string.missing_mail_app)
+					activity.showToast(true, R.string.missing_mail_app)
 				}
 				
 			}
 			
 			R.id.btnContact -> instance?.contact_account?.let { who ->
 				Action_Account.timeline(
-					activity
-					, activity.nextPosition(column)
-					, ColumnType.SEARCH
-					
-					, args = arrayOf("@" + who.username + "@" + who.host, true)
+					activity,
+					activity.nextPosition(column),
+					ColumnType.SEARCH,
+					args = arrayOf("@${who.username}@${who.apDomain.ascii}", true)
 				)
 			}
 			
-			R.id.btnInstance -> App1.openBrowser(activity, "https://${column.instance_uri}/about")
-			R.id.ivThumbnail -> App1.openBrowser(activity, instance?.thumbnail)
+			R.id.btnInstance ->
+				activity.openBrowser("https://${host.ascii}/about")
+			
+			R.id.ivThumbnail ->
+				activity.openBrowser(instance?.thumbnail)
 			
 			R.id.btnAbout ->
-				App1.openBrowser(activity, "https://${column.instance_uri}/about")
+				activity.openBrowser("https://${host.ascii}/about")
 			
 			R.id.btnAboutMore ->
-				App1.openBrowser(activity, "https://${column.instance_uri}/about/more")
+				activity.openBrowser("https://${host.ascii}/about/more")
 			
 			R.id.btnExplore -> Action_Instance.profileDirectoryFromInstanceInformation(
 				activity,
 				column,
-				column.instance_uri,
+				host,
 				instance = instance
 			)
 		}

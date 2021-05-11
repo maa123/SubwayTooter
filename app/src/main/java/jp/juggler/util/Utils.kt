@@ -1,7 +1,35 @@
-//package jp.juggler.util
-//
-//import android.util.SparseBooleanArray
-//import kotlin.collections.set
+package jp.juggler.util
+
+import android.content.Context
+import androidx.core.content.ContextCompat
+
+// 型推論できる文脈だと型名を書かずにすむ
+@Suppress("unused")
+inline fun <reified T : Any> Any?.cast(): T? = this as? T
+
+@Suppress("unused")
+inline fun <reified T : Any> Any.castNotNull(): T = this as T
+
+// 型推論できる文脈だと型名を書かずにすむ
+inline fun <reified T> systemService(context: Context): T? =
+	/* ContextCompat. */ ContextCompat.getSystemService(context, T::class.java)
+
+fun<T:Comparable<T>> minComparable(a:T,b:T):T = if (a <= b) a else b
+fun<T:Comparable<T>> maxComparable(a:T,b:T):T = if (a >= b) a else b
+
+fun <T:Comparable<T>> T.clip(min:T,max:T) = if(this<min) min else if(this>max) max else this
+
+fun <T:Any> MutableCollection<T>.removeFirst( check:(T)->Boolean ): T?{
+    val it = iterator()
+    while(it.hasNext()){
+        val item = it.next()
+        if( check(item)){
+            it.remove()
+            return item
+        }
+    }
+    return null
+}
 //
 //object Utils {
 //

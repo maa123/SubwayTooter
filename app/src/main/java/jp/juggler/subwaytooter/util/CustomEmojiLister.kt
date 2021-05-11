@@ -6,15 +6,16 @@ import android.os.SystemClock
 import jp.juggler.subwaytooter.App1
 import jp.juggler.subwaytooter.api.entity.CustomEmoji
 import jp.juggler.subwaytooter.api.entity.parseList
-import jp.juggler.util.LogCategory
-import jp.juggler.util.toJsonArray
-import jp.juggler.util.toRequestBody
-import org.json.JSONObject
+import jp.juggler.subwaytooter.table.SavedAccount
+import jp.juggler.util.*
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 
-class CustomEmojiLister(internal val context : Context) {
+class CustomEmojiLister(
+	val context : Context,
+	private val handler : Handler
+) {
 	
 	companion object {
 		
@@ -29,7 +30,7 @@ class CustomEmojiLister(internal val context : Context) {
 	}
 	
 	internal class CacheItem(
-		val instance : String,
+		val key : String,
 		var list : ArrayList<CustomEmoji>? = null,
 		var listWithAliases : ArrayList<CustomEmoji>? = null,
 		// ロードした時刻
@@ -39,8 +40,7 @@ class CustomEmojiLister(internal val context : Context) {
 	)
 	
 	internal class Request(
-		val instance : String,
-		val isMisskey : Boolean,
+		val accessInfo : SavedAccount,
 		val reportWithAliases : Boolean = false,
 		val onListLoaded : (list : ArrayList<CustomEmoji>) -> Unit?
 	)
@@ -56,14 +56,10 @@ class CustomEmojiLister(internal val context : Context) {
 	// ロード要求
 	internal val queue = ConcurrentLinkedQueue<Request>()
 	
-	private val handler : Handler
-	
 	private val worker : Worker
 	
 	init {
-		this.handler = Handler(context.mainLooper)
 		this.worker = Worker()
-		worker.start()
 	}
 	
 	// ネットワーク接続が変化したらエラーキャッシュをクリア
@@ -71,17 +67,18 @@ class CustomEmojiLister(internal val context : Context) {
 		cache_error.clear()
 	}
 	
-	private fun getCached(now : Long, instance : String) : CacheItem? {
+	private fun getCached(now : Long, accessInfo : SavedAccount) : CacheItem? {
+		val host = accessInfo.apiHost.ascii
 		
 		// 成功キャッシュ
-		val item = cache[instance]
+		val item = cache[host]
 		if(item != null && now - item.time_update <= ERROR_EXPIRE) {
 			item.time_used = now
 			return item
 		}
 		
 		// エラーキャッシュ
-		val time_error = cache_error[instance]
+		val time_error = cache_error[host]
 		if(time_error != null && now < time_error + ERROR_EXPIRE) {
 			return cache_error_item
 		}
@@ -90,20 +87,16 @@ class CustomEmojiLister(internal val context : Context) {
 	}
 	
 	fun getList(
-		_instance : String,
-		isMisskey : Boolean,
+		accessInfo : SavedAccount,
 		onListLoaded : (list : ArrayList<CustomEmoji>) -> Unit
 	) : ArrayList<CustomEmoji>? {
 		try {
-			if(_instance.isEmpty()) return null
-			val instance = _instance.toLowerCase(Locale.JAPAN)
-			
 			synchronized(cache) {
-				val item = getCached(elapsedTime, instance)
+				val item = getCached(elapsedTime, accessInfo)
 				if(item != null) return item.list
 			}
 			
-			queue.add(Request(instance, isMisskey, onListLoaded = onListLoaded))
+			queue.add(Request(accessInfo, onListLoaded = onListLoaded))
 			worker.notifyEx()
 		} catch(ex : Throwable) {
 			log.trace(ex)
@@ -112,23 +105,18 @@ class CustomEmojiLister(internal val context : Context) {
 	}
 	
 	fun getListWithAliases(
-		_instance : String,
-		isMisskey : Boolean,
+		accessInfo : SavedAccount,
 		onListLoaded : (list : ArrayList<CustomEmoji>) -> Unit
 	) : ArrayList<CustomEmoji>? {
 		try {
-			if(_instance.isEmpty()) return null
-			val instance = _instance.toLowerCase(Locale.JAPAN)
-			
 			synchronized(cache) {
-				val item = getCached(elapsedTime, instance)
+				val item = getCached(elapsedTime, accessInfo)
 				if(item != null) return item.listWithAliases
 			}
 			
 			queue.add(
 				Request(
-					instance,
-					isMisskey,
+					accessInfo,
 					reportWithAliases = true,
 					onListLoaded = onListLoaded
 				)
@@ -140,8 +128,8 @@ class CustomEmojiLister(internal val context : Context) {
 		return null
 	}
 	
-	fun getMap(host : String, isMisskey : Boolean) : HashMap<String, CustomEmoji>? {
-		val list = getList(host, isMisskey) {
+	fun getMap(accessInfo : SavedAccount) : HashMap<String, CustomEmoji>? {
+		val list = getList(accessInfo) {
 			// 遅延ロード非対応
 		} ?: return null
 		//
@@ -152,15 +140,13 @@ class CustomEmojiLister(internal val context : Context) {
 		return dst
 	}
 	
-
-	
 	private inner class Worker : WorkerBase() {
 		
 		override fun cancel() {
 			// このスレッドはキャンセルされない。プロセスが生きている限り動き続ける。
 		}
 		
-		override fun run() {
+		override suspend fun run() {
 			while(true) {
 				try {
 					// リクエストを取得する
@@ -172,7 +158,8 @@ class CustomEmojiLister(internal val context : Context) {
 					}
 					
 					val cached = synchronized(cache) {
-						val item = getCached(elapsedTime, request.instance)
+						
+						val item = getCached(elapsedTime, request.accessInfo)
 						return@synchronized if(item != null) {
 							val list = item.list
 							val listWithAliases = item.listWithAliases
@@ -188,20 +175,27 @@ class CustomEmojiLister(internal val context : Context) {
 					}
 					if(cached) continue
 					
+					val accessInfo = request.accessInfo
+					val cacheKey = accessInfo.apiHost.ascii
 					var list : ArrayList<CustomEmoji>? = null
 					var listWithAlias : ArrayList<CustomEmoji>? = null
 					try {
-						val data = if(request.isMisskey) {
-							App1.getHttpCachedString("https://" + request.instance + "/api/meta") { builder ->
-								builder.post(JSONObject().toRequestBody())
+						val data = if(accessInfo.isMisskey) {
+							App1.getHttpCachedString(
+								"https://${cacheKey}/api/meta",
+								accessInfo = accessInfo
+							) { builder ->
+								builder.post(JsonObject().toRequestBody())
 							}
-							
 						} else {
-							App1.getHttpCachedString("https://" + request.instance + "/api/v1/custom_emojis")
+							App1.getHttpCachedString(
+								"https://${cacheKey}/api/v1/custom_emojis",
+								accessInfo = accessInfo
+							)
 						}
 						
 						if(data != null) {
-							val a = decodeEmojiList(data, request.instance, request.isMisskey)
+							val a = decodeEmojiList(data, accessInfo)
 							list = a
 							listWithAlias = makeListWithAlias(a)
 						}
@@ -213,12 +207,12 @@ class CustomEmojiLister(internal val context : Context) {
 					synchronized(cache) {
 						val now = elapsedTime
 						if(list == null || listWithAlias == null) {
-							cache_error.put(request.instance, now)
+							cache_error.put(cacheKey, now)
 						} else {
-							var item : CacheItem? = cache[request.instance]
+							var item : CacheItem? = cache[cacheKey]
 							if(item == null) {
-								item = CacheItem(request.instance, list, listWithAlias)
-								cache[request.instance] = item
+								item = CacheItem(cacheKey, list, listWithAlias)
+								cache[cacheKey] = item
 							} else {
 								item.list = list
 								item.listWithAliases = listWithAlias
@@ -269,26 +263,33 @@ class CustomEmojiLister(internal val context : Context) {
 			// 古い物から順に捨てる
 			var removed = 0
 			for(item in list) {
-				cache.remove(item.instance)
+				cache.remove(item.key)
 				if(++ removed >= over) break
 			}
 		}
 		
 		private fun decodeEmojiList(
 			data : String,
-			instance : String,
-			isMisskey : Boolean
+			accessInfo : SavedAccount
 		) : ArrayList<CustomEmoji>? {
 			return try {
-				val list = if(isMisskey) {
-					parseList(CustomEmoji.decodeMisskey, JSONObject(data).optJSONArray("emojis"))
+				val list = if(accessInfo.isMisskey) {
+					parseList(
+						CustomEmoji.decodeMisskey,
+						accessInfo.apDomain,
+						data.decodeJsonObject().jsonArray("emojis")
+					)
 				} else {
-					parseList(CustomEmoji.decode, data.toJsonArray())
+					parseList(
+						CustomEmoji.decode,
+						accessInfo.apDomain,
+						data.decodeJsonArray()
+					)
 				}
 				list.sortWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.shortcode })
 				list
 			} catch(ex : Throwable) {
-				log.e(ex, "decodeEmojiList failed. instance=%s", instance)
+				log.e(ex, "decodeEmojiList failed. instance=%s", accessInfo.apiHost.ascii)
 				null
 			}
 		}

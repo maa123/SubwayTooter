@@ -2,14 +2,14 @@ package jp.juggler.subwaytooter.action
 
 import android.content.Context
 import jp.juggler.subwaytooter.api.*
-import jp.juggler.subwaytooter.api.entity.EntityId
-import jp.juggler.subwaytooter.api.entity.TootInstance
-import jp.juggler.subwaytooter.api.entity.TootRelationShip
+import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.subwaytooter.table.UserRelation
+import jp.juggler.subwaytooter.util.matchHost
+import jp.juggler.util.JsonObject
 import jp.juggler.util.LogCategory
+import jp.juggler.util.jsonObject
 import jp.juggler.util.showToast
-import org.json.JSONObject
 import java.util.*
 
 // 疑似アカウントを作成する
@@ -17,15 +17,14 @@ import java.util.*
 // 実アカウントを返すことはない
 internal fun addPseudoAccount(
 	context : Context,
-	host : String,
+	host : Host,
 	instanceInfo : TootInstance? = null,
 	callback : (SavedAccount) -> Unit
 ) {
 	try {
-		val username = "?"
-		val full_acct = "$username@$host"
+		val acct = Acct.parse("?", host)
 		
-		var account = SavedAccount.loadAccountByAcct(context, full_acct)
+		var account = SavedAccount.loadAccountByAcct(context, acct.ascii)
 		if(account != null) {
 			callback(account)
 			return
@@ -36,32 +35,34 @@ internal fun addPseudoAccount(
 				
 				var targetInstance : TootInstance? = null
 				
-				override fun background(client : TootApiClient) : TootApiResult? {
+				override suspend fun background(client : TootApiClient) : TootApiResult? {
 					val (instance, instanceResult) = TootInstance.get(client)
 					targetInstance = instance
 					return instanceResult
 				}
 				
-				override fun handleResult(result : TootApiResult?) = when {
+				override suspend fun handleResult(result : TootApiResult?) = when {
 					result == null -> {
 					}
 					
-					targetInstance == null -> showToast(context, false, result.error)
+					targetInstance == null -> context.showToast(false, result.error)
 					else -> addPseudoAccount(context, host, targetInstance, callback)
 				}
 			})
 			return
 		}
 		
-		val account_info = JSONObject()
-		account_info.put("username", username)
-		account_info.put("acct", username)
+		val account_info = jsonObject {
+			put("username", acct.username)
+			put("acct", acct.username) // ローカルから参照した場合なのでshort acct
+		}
 		
 		val row_id = SavedAccount.insert(
-			host,
-			full_acct,
-			account_info,
-			JSONObject(),
+			acct = acct.ascii,
+			host = host.ascii,
+			domain = instanceInfo.uri,
+			account = account_info,
+			token = JsonObject(),
 			misskeyVersion = instanceInfo.misskeyVersion
 		)
 		
@@ -76,6 +77,7 @@ internal fun addPseudoAccount(
 		account.notification_mention = false
 		account.notification_reaction = false
 		account.notification_vote = false
+		account.notification_post = false
 		account.saveSetting()
 		callback(account)
 		return
@@ -83,24 +85,24 @@ internal fun addPseudoAccount(
 		val log = LogCategory("addPseudoAccount")
 		log.trace(ex)
 		log.e(ex, "failed.")
-		showToast(context, ex, "addPseudoAccount failed.")
+		context.showToast(ex, "addPseudoAccount failed.")
 	}
 	return
 }
 
 // 疑似アカ以外のアカウントのリスト
 fun makeAccountListNonPseudo(
-	context : Context, pickup_host : String?
+	context : Context, pickup_host : Host?
 ) : ArrayList<SavedAccount> {
 	
 	val list_same_host = ArrayList<SavedAccount>()
 	val list_other_host = ArrayList<SavedAccount>()
 	for(a in SavedAccount.loadAccountList(context)) {
 		if(a.isPseudo) continue
-		(if(pickup_host == null || pickup_host.equals(
-				a.host,
-				ignoreCase = true
-			)) list_same_host else list_other_host).add(a)
+		when(pickup_host) {
+			null, a.apDomain, a.apiHost -> list_same_host
+			else -> list_other_host
+		}.add(a)
 	}
 	SavedAccount.sort(list_same_host)
 	SavedAccount.sort(list_other_host)
@@ -152,12 +154,8 @@ const val CROSS_ACCOUNT_REMOTE_INSTANCE = 3
 internal fun calcCrossAccountMode(
 	timeline_account : SavedAccount,
 	action_account : SavedAccount
-) : Int {
-	return if(! timeline_account.host.equals(action_account.host, ignoreCase = true)) {
-		CROSS_ACCOUNT_REMOTE_INSTANCE
-	} else if(! timeline_account.acct.equals(action_account.acct, ignoreCase = true)) {
-		CROSS_ACCOUNT_SAME_INSTANCE
-	} else {
-		NOT_CROSS_ACCOUNT
-	}
+) : Int = when {
+	timeline_account == action_account -> NOT_CROSS_ACCOUNT
+	timeline_account.matchHost(action_account) -> CROSS_ACCOUNT_SAME_INSTANCE
+	else -> CROSS_ACCOUNT_REMOTE_INSTANCE
 }

@@ -20,11 +20,12 @@ Mastodon client app for Android phone/tablet.
 - "Many filters" media TL, app mute, word mute, regex filter, etc.
 - "Auto CW" that folds very long texts automatically
 - "Push notification" (Google Play service required. if not found, this app uses pull notification 15 min period.)
-- Fastest support for Mastodon's new feature
+- Relatively fast support for Mastodon's new feature
 
 ## Install
-- Play store: https://play.google.com/store/apps/details?id=jp.juggler.subwaytooter
-- IzzyOnDroid: https://android.izzysoft.de/repo/apk/jp.juggler.subwaytooter
+
+- Get APK file from assets section in release pages. https://github.com/tateisu/SubwayTooter/releases 
+- Or, add IzzyOnDroid repo to F-Droid app. https://android.izzysoft.de/repo/apk/jp.juggler.subwaytooter
 
 ## Author
 <ul>
@@ -33,10 +34,9 @@ Mastodon client app for Android phone/tablet.
 
 ## resources
 - Official blog (JP) http://subwaytooter.hatenadiary.jp/
-- Discord https://discord.gg/6YPA7UP
+- Matrix room https://matrix.juggler.jp/#/#subwayTooter:matrix.juggler.jp
 
 ## Donation?
 - Amazon(jp) wish list http://amzn.asia/axmNivM
 - Fantia https://fantia.jp/fanclubs/8239
-- Kyash ID: tateisu
 

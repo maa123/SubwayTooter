@@ -9,16 +9,13 @@ import jp.juggler.subwaytooter.api.entity.parseItem
 import jp.juggler.subwaytooter.dialog.DlgConfirm
 import jp.juggler.subwaytooter.dialog.DlgTextInput
 import jp.juggler.subwaytooter.table.SavedAccount
-import jp.juggler.util.dismissSafe
-import jp.juggler.util.showToast
-import jp.juggler.util.toPostRequestBuilder
-import jp.juggler.util.toPutRequestBuilder
+import jp.juggler.util.*
 import okhttp3.Request
-import org.json.JSONObject
 
 object Action_List {
 	
-	interface CreateCallback {
+	fun interface CreateCallback {
+		
 		fun onCreated(list : TootList)
 	}
 	
@@ -32,21 +29,23 @@ object Action_List {
 		TootTaskRunner(activity).run(access_info, object : TootTask {
 			
 			var list : TootList? = null
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				
 				val result = if(access_info.isMisskey) {
 					client.request(
 						"/api/users/lists/create",
-						access_info.putMisskeyApiToken()
-							.put("title", title)
-							.put("name", title)
+						access_info.putMisskeyApiToken().apply {
+							put("title", title)
+							put("name", title)
+						}
 							.toPostRequestBuilder()
 					)
 				} else {
 					client.request(
 						"/api/v1/lists",
-						JSONObject()
-							.put("title", title)
+						jsonObject {
+							put("title", title)
+						}
 							.toPostRequestBuilder()
 					)
 				}
@@ -57,21 +56,21 @@ object Action_List {
 				return result
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				if(result == null) return  // cancelled.
 				
 				val list = this.list
 				if(list != null) {
 					
-					for(column in activity.app_state.column_list) {
+					for(column in activity.app_state.columnList) {
 						column.onListListUpdated(access_info)
 					}
 					
-					showToast(activity, false, R.string.list_created)
+					activity.showToast(false, R.string.list_created)
 					
 					callback?.onCreated(list)
 				} else {
-					showToast(activity, false, result.error)
+					activity.showToast(false, result.error)
 				}
 			}
 		})
@@ -87,8 +86,7 @@ object Action_List {
 		
 		if(! bConfirmed) {
 			DlgConfirm.openSimple(
-				activity
-				, activity.getString(R.string.list_delete_confirm, list.title)
+				activity, activity.getString(R.string.list_delete_confirm, list.title)
 			) {
 				delete(activity, access_info, list, bConfirmed = true)
 			}
@@ -96,30 +94,37 @@ object Action_List {
 		}
 		
 		TootTaskRunner(activity).run(access_info, object : TootTask {
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				return if(access_info.isMisskey) {
-					val params = access_info.putMisskeyApiToken()
-						.put("listId", list.id)
-					client.request("/api/users/lists/delete", params.toPostRequestBuilder())
+					client.request(
+						"/api/users/lists/delete",
+						access_info.putMisskeyApiToken().apply {
+							put("listId", list.id)
+						}
+							.toPostRequestBuilder()
+					)
 					// 204 no content
 				} else {
-					client.request("/api/v1/lists/{list.id}", Request.Builder().delete())
+					client.request(
+						"/api/v1/lists/{list.id}",
+						Request.Builder().delete()
+					)
 				}
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				if(result == null) return  // cancelled.
 				
 				if(result.jsonObject != null) {
 					
-					for(column in activity.app_state.column_list) {
+					for(column in activity.app_state.columnList) {
 						column.onListListUpdated(access_info)
 					}
 					
-					showToast(activity, false, R.string.delete_succeeded)
+					activity.showToast(false, R.string.delete_succeeded)
 					
 				} else {
-					showToast(activity, false, result.error)
+					activity.showToast(false, result.error)
 				}
 			}
 		})
@@ -135,9 +140,9 @@ object Action_List {
 			activity,
 			activity.getString(R.string.rename),
 			item.title,
-			object : DlgTextInput.Callback {
+			callback = object : DlgTextInput.Callback {
 				override fun onEmptyError() {
-					showToast(activity, false, R.string.list_name_empty)
+					activity.showToast(false, R.string.list_name_empty)
 				}
 				
 				override fun onOK(dialog : Dialog, text : String) {
@@ -145,20 +150,23 @@ object Action_List {
 					TootTaskRunner(activity).run(access_info, object : TootTask {
 						var list : TootList? = null
 						
-						override fun background(client : TootApiClient) : TootApiResult? {
+						override suspend fun background(client : TootApiClient) : TootApiResult? {
 							val result = if(access_info.isMisskey) {
 								client.request(
 									"/api/users/lists/update",
-									access_info.putMisskeyApiToken()
-										.put("listId", item.id)
-										.put("title", text)
+									access_info.putMisskeyApiToken().apply {
+										put("listId", item.id)
+										put("title", text)
+									}
 										.toPostRequestBuilder()
 								)
 							} else {
 								client.request(
 									"/api/v1/lists/${item.id}",
-									JSONObject()
-										.put("title", text)
+									jsonObject {
+										put("title", text)
+									}
+										
 										.toPutRequestBuilder()
 								)
 							}
@@ -173,17 +181,17 @@ object Action_List {
 							return result
 						}
 						
-						override fun handleResult(result : TootApiResult?) {
+						override suspend fun handleResult(result : TootApiResult?) {
 							if(result == null) return  // cancelled.
 							
 							val list = this.list
 							if(list != null) {
-								for(column in activity.app_state.column_list) {
+								for(column in activity.app_state.columnList) {
 									column.onListNameUpdated(access_info, list)
 								}
 								dialog.dismissSafe()
 							} else {
-								showToast(activity, false, result.error)
+								activity.showToast(false, result.error)
 							}
 						}
 					})

@@ -2,8 +2,10 @@ package jp.juggler.util
 
 import android.content.Context
 import android.graphics.*
+import    androidx.exifinterface.media.ExifInterface
 import android.net.Uri
-import it.sephiroth.android.library.exif2.ExifInterface
+import androidx.annotation.StringRes
+//import it.sephiroth.android.library.exif2.ExifInterface
 import java.io.FileNotFoundException
 import java.io.InputStream
 import kotlin.math.max
@@ -11,16 +13,17 @@ import kotlin.math.sqrt
 
 private val log = LogCategory("BitmapUtils")
 
-val InputStream.imageOrientation : Int?
-	get() = try {
-		ExifInterface()
-			.readExif(
-				this@imageOrientation,
-				ExifInterface.Options.OPTION_IFD_0
-					or ExifInterface.Options.OPTION_IFD_1
-					or ExifInterface.Options.OPTION_IFD_EXIF
-			)
-			.getTagIntValue(ExifInterface.TAG_ORIENTATION)
+fun InputStream.imageOrientation() : Int? =
+	try {
+		ExifInterface(this)
+			//			.readExif(
+			//				this@imageOrientation,
+			//				ExifInterface.Options.OPTION_IFD_0
+			//					or ExifInterface.Options.OPTION_IFD_1
+			//					or ExifInterface.Options.OPTION_IFD_EXIF
+			//			)
+			.getAttributeInt(ExifInterface.TAG_ORIENTATION, - 1)
+			.takeIf { it >= 0 }
 	} catch(ex : Throwable) {
 		log.w(ex, "imageOrientation: exif parse failed.")
 		null
@@ -60,16 +63,24 @@ fun Matrix.resolveOrientation(orientation : Int?) : Matrix {
 enum class ResizeType {
 	// リサイズなし
 	None,
+	
 	// 長辺がsize以下になるようリサイズ
 	LongSide,
+	
 	// 平方ピクセルが size*size 以下になるようリサイズ
 	SquarePixel,
 }
 
 class ResizeConfig(
 	val type : ResizeType,
-	val size : Int
-)
+	val size : Int,
+	@StringRes val extraStringId: Int = 0,
+){
+	val spec :String get() = when(type){
+		ResizeType.None -> type.toString()
+		else ->"$type,$size"
+	}
+}
 
 fun createResizedBitmap(
 	context : Context,
@@ -104,7 +115,7 @@ fun createResizedBitmap(
 	try {
 		
 		val orientation : Int? = context.contentResolver.openInputStream(uri)?.use {
-			it.imageOrientation
+			it.imageOrientation()
 		}
 		
 		// 画像のサイズを調べる
@@ -120,7 +131,7 @@ fun createResizedBitmap(
 		var src_width = options.outWidth
 		var src_height = options.outHeight
 		if(src_width <= 0 || src_height <= 0) {
-			showToast(context, false, "could not get image bounds.")
+			context.showToast(false, "could not get image bounds.")
 			return null
 		}
 		
@@ -200,7 +211,7 @@ fun createResizedBitmap(
 			}
 		
 		if(sourceBitmap == null) {
-			showToast(context, false, "could not decode image.")
+			context.showToast(false, "could not decode image.")
 			return null
 		}
 		try {
@@ -230,7 +241,7 @@ fun createResizedBitmap(
 				Bitmap.createBitmap(dstSizeInt.x, dstSizeInt.y, Bitmap.Config.ARGB_8888)
 			try {
 				return if(dst == null) {
-					showToast(context, false, "bitmap creation failed.")
+					context.showToast(false, "bitmap creation failed.")
 					null
 				} else {
 					val canvas = Canvas(dst)

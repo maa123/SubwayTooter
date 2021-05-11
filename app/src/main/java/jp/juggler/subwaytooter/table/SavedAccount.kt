@@ -6,32 +6,37 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.provider.BaseColumns
 import jp.juggler.subwaytooter.App1
-import jp.juggler.subwaytooter.PollingWorker
+import jp.juggler.subwaytooter.R
 import jp.juggler.subwaytooter.api.TootApiClient
 import jp.juggler.subwaytooter.api.TootApiResult
 import jp.juggler.subwaytooter.api.TootParser
-import jp.juggler.subwaytooter.api.entity.EntityId
-import jp.juggler.subwaytooter.api.entity.TootAccount
-import jp.juggler.subwaytooter.api.entity.TootNotification
-import jp.juggler.subwaytooter.api.entity.TootVisibility
+import jp.juggler.subwaytooter.api.entity.*
+import jp.juggler.subwaytooter.notification.PollingWorker
 import jp.juggler.subwaytooter.util.LinkHelper
 import jp.juggler.util.*
-import org.json.JSONObject
 import java.util.*
-import java.util.regex.Pattern
+import kotlin.math.max
 
 class SavedAccount(
 	val db_id : Long,
-	val acct : String,
-	hostArg : String? = null,
-	var token_info : JSONObject? = null,
+	acctArg : String,
+	apiHostArg : String? = null,
+	apDomainArg : String? = null,
+	var token_info : JsonObject? = null,
 	var loginAccount : TootAccount? = null, // 疑似アカウントではnull
 	override val misskeyVersion : Int = 0
 ) : LinkHelper {
 	
+	// SavedAccountのロード時にhostを供給する必要があった
+	override val apiHost : Host
+	//	fun findAcct(url : String?) : String? = null
+	//	fun colorFromAcct(acct : String?) : AcctColor? = null
+	
+	override val apDomain : Host
+	
 	val username : String
 	
-	override val host : String
+	val acct : Acct
 	
 	var visibility : TootVisibility = TootVisibility.Public
 	var confirm_boost : Boolean = false
@@ -49,6 +54,7 @@ class SavedAccount(
 	var notification_follow_request : Boolean = false
 	var notification_reaction : Boolean = false
 	var notification_vote : Boolean = false
+	var notification_post : Boolean = false
 	var sound_uri = ""
 	
 	var confirm_follow : Boolean = false
@@ -69,40 +75,47 @@ class SavedAccount(
 	var last_notification_error : String? = null
 	var last_subscription_error : String? = null
 	var last_push_endpoint : String? = null
-	
+
+	var image_resize: String? = null
+	var image_max_megabytes : String? = null
+	var movie_max_megabytes : String? = null
+
+	var push_policy : String? = null
+
 	init {
-		val pos = acct.indexOf('@')
-		if(pos == - 1) {
-			this.username = acct
-		} else {
-			this.username = acct.substring(0, pos)
-		}
+		val tmpAcct = Acct.parse(acctArg)
+		this.username = tmpAcct.username
 		if(username.isEmpty()) throw RuntimeException("missing username in acct")
 		
-		this.host = if(hostArg != null && hostArg.isNotEmpty()) {
-			hostArg
-		} else {
-			val hostInAcct = if(pos == - 1) "" else acct.substring(pos + 1)
-			if(hostInAcct.isEmpty()) throw RuntimeException("missing host in acct")
-			hostInAcct
-		}.toLowerCase(Locale.JAPAN)
+		val tmpApiHost = apiHostArg?.notEmpty()?.let { Host.parse(it) }
+		val tmpApDomain = apDomainArg?.notEmpty()?.let { Host.parse(it) }
+		
+		this.apiHost = tmpApiHost ?: tmpApDomain ?: tmpAcct.host ?: error("missing apiHost")
+		this.apDomain = tmpApDomain ?: tmpApiHost ?: tmpAcct.host ?: error("missing apDomain")
+
+		this.acct = tmpAcct.followHost(apDomain)
 	}
 	
 	constructor(context : Context, cursor : Cursor) : this(
-		cursor.getLong(COL_ID), // db_id
-		cursor.getString(COL_USER), // acct
-		cursor.getString(COL_HOST) // host
-		, misskeyVersion = cursor.getInt(COL_MISSKEY_VERSION)
+		db_id = cursor.getLong(COL_ID), // db_id
+		acctArg = cursor.getString(COL_USER), // acct
+		apiHostArg = cursor.getStringOrNull(COL_HOST), // host
+		apDomainArg = cursor.getStringOrNull(COL_DOMAIN), // host
+		misskeyVersion = cursor.getInt(COL_MISSKEY_VERSION)
 	) {
 		val strAccount = cursor.getString(COL_ACCOUNT)
-		val jsonAccount = strAccount.toJsonObject()
+		val jsonAccount = strAccount.decodeJsonObject()
 		
-		loginAccount = if(jsonAccount.opt("id") == null) {
+		loginAccount = if(jsonAccount["id"] == null) {
 			null // 疑似アカウント
 		} else {
 			TootParser(
 				context,
-				LinkHelper.newLinkHelper(this@SavedAccount.host, misskeyVersion = misskeyVersion)
+				LinkHelper.create(
+					apiHostArg = this@SavedAccount.apiHost,
+					apDomainArg = this@SavedAccount.apDomain,
+					misskeyVersion = misskeyVersion
+				)
 			).account(jsonAccount)
 				?: error("missing loginAccount for $strAccount")
 		}
@@ -126,6 +139,7 @@ class SavedAccount(
 		notification_follow_request = cursor.getBoolean(COL_NOTIFICATION_FOLLOW_REQUEST)
 		notification_reaction = cursor.getBoolean(COL_NOTIFICATION_REACTION)
 		notification_vote = cursor.getBoolean(COL_NOTIFICATION_VOTE)
+		notification_post = cursor.getBoolean(COL_NOTIFICATION_POST)
 		
 		dont_hide_nsfw = cursor.getBoolean(COL_DONT_HIDE_NSFW)
 		dont_show_timeout = cursor.getBoolean(COL_DONT_SHOW_TIMEOUT)
@@ -136,7 +150,7 @@ class SavedAccount(
 		
 		register_time = cursor.getLong(COL_REGISTER_TIME)
 		
-		token_info = cursor.getString(COL_TOKEN).toJsonObject()
+		token_info = cursor.getString(COL_TOKEN).decodeJsonObject()
 		
 		sound_uri = cursor.getString(COL_SOUND_URI)
 		
@@ -149,10 +163,15 @@ class SavedAccount(
 		last_notification_error = cursor.getStringOrNull(COL_LAST_NOTIFICATION_ERROR)
 		last_subscription_error = cursor.getStringOrNull(COL_LAST_SUBSCRIPTION_ERROR)
 		last_push_endpoint = cursor.getStringOrNull(COL_LAST_PUSH_ENDPOINT)
+
+		image_resize = cursor.getStringOrNull(COL_IMAGE_RESIZE)
+		image_max_megabytes = cursor.getStringOrNull(COL_IMAGE_MAX_MEGABYTES)
+		movie_max_megabytes = cursor.getStringOrNull(COL_MOVIE_MAX_MEGABYTES)
+		push_policy = cursor.getStringOrNull(COL_PUSH_POLICY)
 	}
 	
 	val isNA : Boolean
-		get() = "?@?" == acct
+		get() = acct == Acct.UNKNOWN
 	
 	val isPseudo : Boolean
 		get() = username == "?"
@@ -167,11 +186,11 @@ class SavedAccount(
 		
 	}
 	
-	fun updateTokenInfo(tokenInfoArg : JSONObject?) {
+	fun updateTokenInfo(tokenInfoArg : JsonObject?) {
 		
 		if(db_id == INVALID_DB_ID) throw RuntimeException("updateTokenInfo: missing db_id")
 		
-		val token_info = tokenInfoArg ?: JSONObject()
+		val token_info = tokenInfoArg ?: JsonObject()
 		this.token_info = token_info
 		
 		val cv = ContentValues()
@@ -199,6 +218,7 @@ class SavedAccount(
 		cv.put(COL_NOTIFICATION_FOLLOW_REQUEST, notification_follow_request.b2i())
 		cv.put(COL_NOTIFICATION_REACTION, notification_reaction.b2i())
 		cv.put(COL_NOTIFICATION_VOTE, notification_vote.b2i())
+		cv.put(COL_NOTIFICATION_POST, notification_post.b2i())
 		
 		cv.put(COL_CONFIRM_FOLLOW, confirm_follow.b2i())
 		cv.put(COL_CONFIRM_FOLLOW_LOCKED, confirm_follow_locked.b2i())
@@ -211,7 +231,12 @@ class SavedAccount(
 		cv.put(COL_DEFAULT_SENSITIVE, default_sensitive.b2i())
 		cv.put(COL_EXPAND_CW, expand_cw.b2i())
 		cv.put(COL_MAX_TOOT_CHARS, max_toot_chars)
-		
+
+		cv.putOrNull(COL_IMAGE_RESIZE,image_resize)
+		cv.putOrNull(COL_IMAGE_MAX_MEGABYTES, image_max_megabytes)
+		cv.putOrNull(COL_MOVIE_MAX_MEGABYTES, movie_max_megabytes)
+		cv.putOrNull(COL_PUSH_POLICY,push_policy)
+
 		// UIからは更新しない
 		// notification_tag
 		// register_key
@@ -265,111 +290,62 @@ class SavedAccount(
 		this.notification_follow_request = b.notification_follow_request
 		this.notification_reaction = b.notification_reaction
 		this.notification_vote = b.notification_vote
+		this.notification_post = b.notification_post
+		
 		this.notification_tag = b.notification_tag
 		this.default_text = b.default_text
 		this.default_sensitive = b.default_sensitive
 		this.expand_cw = b.expand_cw
 		
 		this.sound_uri = b.sound_uri
+
+		this.image_resize = b.image_resize
+		this.image_max_megabytes = b.image_max_megabytes
+		this.movie_max_megabytes = b.movie_max_megabytes
+		this.push_policy = b.push_policy
 	}
 	
-	fun getFullAcct(who : TootAccount?) : String {
-		return getFullAcct(who?.acct)
-	}
+	fun getFullAcct(who : TootAccount?) = getFullAcct(who?.acct)
 	
-	private fun isLocalUser(acct : String?) : Boolean {
+	fun isRemoteUser(who : TootAccount) : Boolean = ! isLocalUser(who.acct)
+	fun isLocalUser(who : TootAccount?) : Boolean = isLocalUser(who?.acct)
+	private fun isLocalUser(acct : Acct?) : Boolean {
 		acct ?: return false
-		val pos = acct.indexOf('@')
-		return pos == - 1 || host.equals(acct.substring(pos + 1), ignoreCase = true)
-	}
-	
-	fun isLocalUser(who : TootAccount?) : Boolean {
-		return isLocalUser(who?.acct)
-	}
-	
-	fun isRemoteUser(who : TootAccount) : Boolean {
-		return ! isLocalUser(who)
+		return acct.host == null || acct.host == this.apDomain
 	}
 	
 	//	fun isRemoteUser(acct : String) : Boolean {
 	//		return ! isLocalUser(acct)
 	//	}
 	
-	fun getUserUrl(who_acct : String) : String {
-		val p = who_acct.indexOf('@')
-		return if(- 1 != p) {
-			"https://" + who_acct.substring(p + 1) + "/@" + who_acct.substring(0, p)
-		} else {
-			"https://$host/@$who_acct"
-		}
-	}
+	fun isMe(who : TootAccount?) : Boolean = isMe(who?.acct)
+	//	fun isMe(who_acct : String) : Boolean  = isMe(Acct.parse(who_acct))
 	
-	fun isMe(who : TootAccount?) : Boolean {
-		if(who == null || who.username != this.username) return false
-		//
-		val who_acct = who.acct
-		val pos = who_acct.indexOf('@')
-		if(pos == - 1) return true // local user have no acct
-		return who_acct.substring(pos + 1).equals(this.host, ignoreCase = true)
-	}
-	
-	fun isMe(who_acct : String) : Boolean {
-		// 自分のユーザ名部分
-		var pos = this.acct.indexOf('@')
-		val me_user = this.acct.substring(0, pos)
-		
-		//
-		pos = who_acct.indexOf('@')
-		// ローカルユーザは@以降を持たない
-		if(pos == - 1) return who_acct == me_user
-		// リモートユーザならホスト名部分の比較も必要
-		val who_user = who_acct.substring(0, pos)
-		val who_host = who_acct.substring(pos + 1)
-		return who_user == me_user && who_host.equals(this.host, ignoreCase = true)
+	fun isMe(who_acct : Acct?) : Boolean {
+		who_acct ?: return false
+		if(who_acct.username != this.acct.username) return false
+		return who_acct.host == null || who_acct.host == this.acct.host
 	}
 	
 	fun supplyBaseUrl(url : String?) : String? {
 		return when {
 			url == null || url.isEmpty() -> return null
-			url[0] == '/' -> "https://$host$url"
+			url[0] == '/' -> "https://${apiHost.ascii}$url"
 			else -> url
 		}
 	}
 	
-	fun isNicoru(account : TootAccount?) : Boolean {
-		var host = this.host
-		var host_start = 0
-		val acct = account?.acct
-		if(acct != null) {
-			val pos = acct.indexOf('@')
-			if(pos != - 1) {
-				host = account.acct
-				host_start = pos + 1
-			}
-		}
-		return host_match(strNicoruHost, 0, host, host_start)
-	}
-	
-	// implements LinkHelper
-	override fun findAcctColor(url : String?) : AcctColor? {
-		if(url != null) {
-			val acct = TootAccount.getAcctFromUrl(url)
-			if(acct != null) {
-				return AcctColor.load(acct)
-			}
-		}
-		return null
-	}
+	fun isNicoru(account : TootAccount?) : Boolean = account?.apiHost == Host.FRIENDS_NICO
 	
 	companion object : TableCompanion {
+		
 		private val log = LogCategory("SavedAccount")
 		
 		const val table = "access_info"
-		private const val strNicoruHost = "friends.nico"
-		private val reAtNicoruHost = Pattern.compile("@friends\\.nico\\z", Pattern.CASE_INSENSITIVE)
 		
 		private const val COL_ID = BaseColumns._ID
 		private const val COL_HOST = "h"
+		private const val COL_DOMAIN = "d"
 		private const val COL_USER = "u"
 		private const val COL_ACCOUNT = "a"
 		private const val COL_TOKEN = "t"
@@ -385,6 +361,7 @@ class SavedAccount(
 		private const val COL_NOTIFICATION_FOLLOW_REQUEST = "notification_follow_request" // スキーマ44
 		private const val COL_NOTIFICATION_REACTION = "notification_reaction" // スキーマ33
 		private const val COL_NOTIFICATION_VOTE = "notification_vote" // スキーマ33
+		private const val COL_NOTIFICATION_POST = "notification_post" // スキーマ57
 		
 		private const val COL_CONFIRM_FOLLOW = "confirm_follow" // スキーマ10
 		private const val COL_CONFIRM_FOLLOW_LOCKED = "confirm_follow_locked" // スキーマ10
@@ -423,7 +400,13 @@ class SavedAccount(
 		private const val COL_LAST_NOTIFICATION_ERROR = "last_notification_error" // スキーマ42
 		private const val COL_LAST_SUBSCRIPTION_ERROR = "last_subscription_error" // スキーマ45
 		private const val COL_LAST_PUSH_ENDPOINT = "last_push_endpoint" // スキーマ46
-		
+
+		private const val COL_IMAGE_RESIZE = "image_resize" // スキーマ59
+		private const val COL_IMAGE_MAX_MEGABYTES = "image_max_megabytes" // スキーマ59
+		private const val COL_MOVIE_MAX_MEGABYTES = "movie_max_megabytes" // スキーマ59
+
+		private const val COL_PUSH_POLICY = "push_policy" // スキーマ60
+
 		/////////////////////////////////
 		// login information
 		const val INVALID_DB_ID = - 1L
@@ -510,6 +493,20 @@ class SavedAccount(
 					// スキーマ46から
 					+ ",$COL_LAST_PUSH_ENDPOINT text"
 					
+					// スキーマ56から
+					+ ",$COL_DOMAIN text"
+					
+					// スキーマ57から
+					+ ",$COL_NOTIFICATION_POST integer default 1"
+
+					// スキーマ59から
+					+ ",$COL_IMAGE_RESIZE text default null"
+					+ ",$COL_IMAGE_MAX_MEGABYTES text default null"
+					+ ",$COL_MOVIE_MAX_MEGABYTES text default null"
+
+					// スキーマ60から
+					+ ",$COL_PUSH_POLICY text default null"
+
 					+ ")"
 			)
 			db.execSQL("create index if not exists ${table}_user on ${table}(u)")
@@ -517,7 +514,11 @@ class SavedAccount(
 		}
 		
 		override fun onDBUpgrade(db : SQLiteDatabase, oldVersion : Int, newVersion : Int) {
-			if(oldVersion < 2 && newVersion >= 2) {
+			fun isUpgraded(n:Int,block:()->Unit){
+				if( oldVersion < n && newVersion >= n ) block()
+			}
+
+			isUpgraded(2){
 				try {
 					db.execSQL("alter table $table add column notification_mention integer default 1")
 				} catch(ex : Throwable) {
@@ -543,7 +544,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 10 && newVersion >= 10) {
+			isUpgraded( 10) {
 				try {
 					db.execSQL("alter table $table add column $COL_CONFIRM_FOLLOW integer default 1")
 				} catch(ex : Throwable) {
@@ -569,7 +570,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 13 && newVersion >= 13) {
+			isUpgraded( 13) {
 				try {
 					db.execSQL("alter table $table add column $COL_NOTIFICATION_TAG text default ''")
 				} catch(ex : Throwable) {
@@ -577,7 +578,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 14 && newVersion >= 14) {
+			isUpgraded( 14) {
 				try {
 					db.execSQL("alter table $table add column $COL_REGISTER_KEY text default ''")
 				} catch(ex : Throwable) {
@@ -591,7 +592,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 16 && newVersion >= 16) {
+			isUpgraded( 16) {
 				try {
 					db.execSQL("alter table $table add column $COL_SOUND_URI text default ''")
 				} catch(ex : Throwable) {
@@ -599,7 +600,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 18 && newVersion >= 18) {
+			isUpgraded( 18) {
 				try {
 					db.execSQL("alter table $table add column $COL_DONT_SHOW_TIMEOUT integer default 0")
 				} catch(ex : Throwable) {
@@ -607,7 +608,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 23 && newVersion >= 23) {
+			isUpgraded( 23) {
 				try {
 					db.execSQL("alter table $table add column $COL_CONFIRM_FAVOURITE integer default 1")
 				} catch(ex : Throwable) {
@@ -615,7 +616,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 24 && newVersion >= 24) {
+			isUpgraded( 24) {
 				try {
 					db.execSQL("alter table $table add column $COL_CONFIRM_UNFAVOURITE integer default 1")
 				} catch(ex : Throwable) {
@@ -628,7 +629,7 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 27 && newVersion >= 27) {
+			isUpgraded( 27) {
 				try {
 					db.execSQL("alter table $table add column $COL_DEFAULT_TEXT text default ''")
 				} catch(ex : Throwable) {
@@ -636,15 +637,15 @@ class SavedAccount(
 				}
 				
 			}
-			if(oldVersion < 28 && newVersion >= 28) {
+			isUpgraded( 28) {
 				try {
 					db.execSQL("alter table $table add column $COL_MISSKEY_VERSION integer default 0")
 				} catch(ex : Throwable) {
 					log.trace(ex)
 				}
-				
 			}
-			if(oldVersion < 33 && newVersion >= 33) {
+
+			isUpgraded( 33) {
 				try {
 					db.execSQL("alter table $table add column $COL_NOTIFICATION_REACTION integer default 1")
 				} catch(ex : Throwable) {
@@ -655,9 +656,9 @@ class SavedAccount(
 				} catch(ex : Throwable) {
 					log.trace(ex)
 				}
-				
 			}
-			if(oldVersion < 38 && newVersion >= 38) {
+
+			isUpgraded( 38) {
 				try {
 					db.execSQL("alter table $table add column $COL_DEFAULT_SENSITIVE integer default 0")
 				} catch(ex : Throwable) {
@@ -670,48 +671,107 @@ class SavedAccount(
 				}
 				
 			}
-			
-			if(oldVersion < 39 && newVersion >= 39) {
+
+			isUpgraded( 39) {
 				try {
 					db.execSQL("alter table $table add column $COL_MAX_TOOT_CHARS integer default 0")
 				} catch(ex : Throwable) {
 					log.trace(ex)
 				}
 			}
-			
-			if(oldVersion < 42 && newVersion >= 42) {
+
+			isUpgraded( 42) {
 				try {
 					db.execSQL("alter table $table add column $COL_LAST_NOTIFICATION_ERROR text")
 				} catch(ex : Throwable) {
 					log.trace(ex)
 				}
 			}
-			
-			if(oldVersion < 44 && newVersion >= 44) {
+
+			isUpgraded( 44) {
 				try {
 					db.execSQL("alter table $table add column $COL_NOTIFICATION_FOLLOW_REQUEST integer default 1")
 				} catch(ex : Throwable) {
 					log.trace(ex)
 				}
 			}
-			
-			if(oldVersion < 45 && newVersion >= 45) {
+
+			isUpgraded( 45) {
 				try {
 					db.execSQL("alter table $table add column $COL_LAST_SUBSCRIPTION_ERROR text")
 				} catch(ex : Throwable) {
 					log.trace(ex)
 				}
 			}
-			if(oldVersion < 46 && newVersion >= 46) {
+			isUpgraded(46) {
 				try {
 					db.execSQL("alter table $table add column $COL_LAST_PUSH_ENDPOINT text")
 				} catch(ex : Throwable) {
 					log.trace(ex)
 				}
 			}
-			
+			isUpgraded( 56) {
+				try {
+					db.execSQL("alter table $table add column $COL_DOMAIN text")
+				} catch(ex : Throwable) {
+					log.trace(ex)
+				}
+			}
+			isUpgraded( 57) {
+				try {
+					db.execSQL("alter table $table add column $COL_NOTIFICATION_POST integer default 1")
+				} catch(ex : Throwable) {
+					log.trace(ex)
+				}
+				
+			}
+			isUpgraded( 59) {
+				try {
+					db.execSQL("alter table $table add column $COL_IMAGE_RESIZE text default null")
+				} catch(ex : Throwable) {
+					log.trace(ex)
+				}
+				try {
+					db.execSQL("alter table $table add column $COL_IMAGE_MAX_MEGABYTES text default null")
+				} catch(ex : Throwable) {
+					log.trace(ex)
+				}
+				try {
+					db.execSQL("alter table $table add column $COL_MOVIE_MAX_MEGABYTES text default null")
+				} catch(ex : Throwable) {
+					log.trace(ex)
+				}
+			}
+			isUpgraded( 60) {
+				try {
+					db.execSQL("alter table $table add column $COL_PUSH_POLICY text default null")
+				} catch(ex : Throwable) {
+					log.trace(ex)
+				}
+			}
 		}
-		
+
+		val defaultResizeConfig = ResizeConfig(ResizeType.LongSide, 1280)
+
+		internal val resizeConfigList = arrayOf(
+			ResizeConfig(ResizeType.None, 0),
+
+			ResizeConfig(ResizeType.LongSide, 640),
+			ResizeConfig(ResizeType.LongSide, 800),
+			ResizeConfig(ResizeType.LongSide, 1024),
+			ResizeConfig(ResizeType.LongSide, 1280),
+			ResizeConfig(ResizeType.LongSide, 1600),
+			ResizeConfig(ResizeType.LongSide, 2048),
+
+			ResizeConfig(ResizeType.SquarePixel, 640),
+			ResizeConfig(ResizeType.SquarePixel, 800),
+			ResizeConfig(ResizeType.SquarePixel, 1024),
+			ResizeConfig(ResizeType.SquarePixel, 1280),
+			ResizeConfig(ResizeType.SquarePixel, 1440, R.string.size_1920_1080),
+			ResizeConfig(ResizeType.SquarePixel, 1600),
+			ResizeConfig(ResizeType.SquarePixel, 2048)
+		)
+
 		// 横断検索用の、何とも紐ついていないアカウント
 		// 保存しない。
 		val na : SavedAccount by lazy {
@@ -723,6 +783,7 @@ class SavedAccount(
 			dst.notification_mention = false
 			dst.notification_reaction = false
 			dst.notification_vote = false
+			dst.notification_post = false
 			
 			dst
 		}
@@ -738,16 +799,18 @@ class SavedAccount(
 		}
 		
 		fun insert(
-			host : String,
 			acct : String,
-			account : JSONObject,
-			token : JSONObject,
+			host : String,
+			domain : String?,
+			account : JsonObject,
+			token : JsonObject,
 			misskeyVersion : Int = 0
 		) : Long {
 			try {
 				val cv = ContentValues()
-				cv.put(COL_HOST, host)
 				cv.put(COL_USER, acct)
+				cv.put(COL_HOST, host)
+				cv.putOrNull(COL_DOMAIN, domain)
 				cv.put(COL_ACCOUNT, account.toString())
 				cv.put(COL_TOKEN, token.toString())
 				cv.put(COL_MISSKEY_VERSION, misskeyVersion)
@@ -814,7 +877,7 @@ class SavedAccount(
 			} catch(ex : Throwable) {
 				log.trace(ex)
 				log.e(ex, "loadAccountList failed.")
-				showToast(context, true, ex.withCaption("(SubwayTooter) broken in-app database?"))
+				context.showToast(true, ex.withCaption("(SubwayTooter) broken in-app database?"))
 			}
 			
 			return result
@@ -915,47 +978,47 @@ class SavedAccount(
 				return 0L
 			}
 		
-		fun isNicoru(acct : String?) : Boolean {
-			return acct != null && reAtNicoruHost.matcher(acct).find()
+		fun isNicoru(acct : Acct) : Boolean {
+			return acct.host == Host.FRIENDS_NICO
 		}
 		
-		private fun charAtLower(src : CharSequence, pos : Int) : Char {
-			val c = src[pos]
-			return if(c >= 'a' && c <= 'z') c - ('a' - 'A') else c
-		}
-		
-		@Suppress("SameParameterValue")
-		private fun host_match(
-			a : CharSequence,
-			a_startArg : Int,
-			b : CharSequence,
-			b_startArg : Int
-		) : Boolean {
-			var a_start = a_startArg
-			var b_start = b_startArg
-			
-			val a_end = a.length
-			val b_end = b.length
-			
-			var a_remain = a_end - a_start
-			val b_remain = b_end - b_start
-			
-			// 文字数が違う
-			if(a_remain != b_remain) return false
-			
-			// 文字数がゼロ
-			if(a_remain <= 0) return true
-			
-			// 末尾の文字が違う
-			if(charAtLower(a, a_end - 1) != charAtLower(b, b_end - 1)) return false
-			
-			// 先頭からチェック
-			while(a_remain -- > 0) {
-				if(charAtLower(a, a_start ++) != charAtLower(b, b_start ++)) return false
-			}
-			
-			return true
-		}
+		//		private fun charAtLower(src : CharSequence, pos : Int) : Char {
+		//			val c = src[pos]
+		//			return if(c >= 'a' && c <= 'z') c - ('a' - 'A') else c
+		//		}
+		//
+		//		@Suppress("SameParameterValue")
+		//		private fun host_match(
+		//			a : CharSequence,
+		//			a_startArg : Int,
+		//			b : CharSequence,
+		//			b_startArg : Int
+		//		) : Boolean {
+		//			var a_start = a_startArg
+		//			var b_start = b_startArg
+		//
+		//			val a_end = a.length
+		//			val b_end = b.length
+		//
+		//			var a_remain = a_end - a_start
+		//			val b_remain = b_end - b_start
+		//
+		//			// 文字数が違う
+		//			if(a_remain != b_remain) return false
+		//
+		//			// 文字数がゼロ
+		//			if(a_remain <= 0) return true
+		//
+		//			// 末尾の文字が違う
+		//			if(charAtLower(a, a_end - 1) != charAtLower(b, b_end - 1)) return false
+		//
+		//			// 先頭からチェック
+		//			while(a_remain -- > 0) {
+		//				if(charAtLower(a, a_start ++) != charAtLower(b, b_start ++)) return false
+		//			}
+		//
+		//			return true
+		//		}
 		
 		private val account_comparator = Comparator<SavedAccount> { a, b ->
 			var i : Int
@@ -968,8 +1031,8 @@ class SavedAccount(
 			i = a.isPseudo.b2i() - b.isPseudo.b2i()
 			if(i != 0) return@Comparator i
 			
-			val sa = AcctColor.getNickname(a.acct)
-			val sb = AcctColor.getNickname(b.acct)
+			val sa = AcctColor.getNickname(a)
+			val sb = AcctColor.getNickname(b)
 			sa.compareTo(sb, ignoreCase = true)
 		}
 		
@@ -1013,15 +1076,15 @@ class SavedAccount(
 	}
 	
 	fun getAccessToken() : String? {
-		return token_info?.parseString("access_token")
+		return token_info?.string("access_token")
 	}
 	
 	val misskeyApiToken : String?
-		get() = token_info?.parseString(TootApiClient.KEY_API_KEY_MISSKEY)
+		get() = token_info?.string(TootApiClient.KEY_API_KEY_MISSKEY)
 	
-	fun putMisskeyApiToken(params : JSONObject = JSONObject()) : JSONObject {
+	fun putMisskeyApiToken(params : JsonObject = JsonObject()) : JsonObject {
 		val apiKey = misskeyApiToken
-		if(apiKey?.isNotEmpty() == true) params.put("i", apiKey)
+		if(apiKey?.isNotEmpty() == true) params["i"] = apiKey
 		return params
 	}
 	
@@ -1040,11 +1103,16 @@ class SavedAccount(
 		TootNotification.TYPE_UNFOLLOW -> notification_follow
 		
 		TootNotification.TYPE_FOLLOW_REQUEST,
-		TootNotification.TYPE_FOLLOW_REQUEST_MISSKEY -> notification_follow_request
+		TootNotification.TYPE_FOLLOW_REQUEST_MISSKEY,
+		TootNotification.TYPE_FOLLOW_REQUEST_ACCEPTED_MISSKEY -> notification_follow_request
 		
 		TootNotification.TYPE_REACTION -> notification_reaction
 		
-		TootNotification.TYPE_VOTE, TootNotification.TYPE_POLL -> notification_vote
+		TootNotification.TYPE_VOTE,
+		TootNotification.TYPE_POLL,
+		TootNotification.TYPE_POLL_VOTE_MISSKEY -> notification_vote
+		
+		TootNotification.TYPE_STATUS -> notification_post
 		
 		else -> false
 	}
@@ -1055,7 +1123,7 @@ class SavedAccount(
 			return myId != EntityId.CONFIRMING
 		}
 	
-	fun checkConfirmed(context : Context, client : TootApiClient) : TootApiResult? {
+	suspend fun checkConfirmed(context : Context, client : TootApiClient) : TootApiResult? {
 		try {
 			val myId = this.loginAccount?.id
 			if(db_id != INVALID_DB_ID && myId == EntityId.CONFIRMING) {
@@ -1082,7 +1150,7 @@ class SavedAccount(
 	
 	fun updateNotificationError(text : String?) {
 		this.last_notification_error = text
-		if(db_id != INVALID_DB_ID){
+		if(db_id != INVALID_DB_ID) {
 			val cv = ContentValues()
 			when(text) {
 				null -> cv.putNull(COL_LAST_NOTIFICATION_ERROR)
@@ -1094,7 +1162,7 @@ class SavedAccount(
 	
 	fun updateSubscriptionError(text : String?) {
 		this.last_subscription_error = text
-		if(db_id != INVALID_DB_ID){
+		if(db_id != INVALID_DB_ID) {
 			val cv = ContentValues()
 			when(text) {
 				null -> cv.putNull(COL_LAST_SUBSCRIPTION_ERROR)
@@ -1106,7 +1174,7 @@ class SavedAccount(
 	
 	fun updateLastPushEndpoint(text : String?) {
 		this.last_push_endpoint = text
-		if(db_id != INVALID_DB_ID){
+		if(db_id != INVALID_DB_ID) {
 			val cv = ContentValues()
 			when(text) {
 				null -> cv.putNull(COL_LAST_PUSH_ENDPOINT)
@@ -1116,4 +1184,27 @@ class SavedAccount(
 		}
 	}
 	
+	override fun equals(other : Any?) : Boolean =
+		when(other) {
+			is SavedAccount -> acct == other.acct
+			else -> false
+		}
+	
+	override fun hashCode() : Int = acct.hashCode()
+
+
+	fun getResizeConfig() =
+		resizeConfigList.find { it.spec == this.image_resize } ?: defaultResizeConfig
+
+	fun getMovieMaxBytes(ti:TootInstance) = 1000000 * max(
+		1,
+		this.movie_max_megabytes?.toIntOrNull()
+			?: if(  ti.instanceType == InstanceType.Pixelfed) 15 else 40
+	)
+
+	fun getImageMaxBytes(ti:TootInstance) = 1000000 * max(
+		1,
+		this.image_max_megabytes?.toIntOrNull()
+			?: if(  ti.instanceType == InstanceType.Pixelfed) 15 else 8
+	)
 }

@@ -3,30 +3,23 @@ package jp.juggler.subwaytooter
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Application
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import android.graphics.Color
-import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.util.Log
-import android.view.View
-import android.view.WindowManager
-import androidx.browser.customtabs.CustomTabsIntent
+import androidx.appcompat.app.AppCompatActivity
 import com.bumptech.glide.Glide
 import com.bumptech.glide.GlideBuilder
 import com.bumptech.glide.Registry
 import com.bumptech.glide.integration.okhttp3.OkHttpUrlLoader
 import com.bumptech.glide.load.engine.cache.InternalCacheDiskCacheFactory
 import com.bumptech.glide.load.engine.executor.GlideExecutor
-import com.bumptech.glide.load.engine.executor.GlideExecutor.newDiskCacheExecutor
-import com.bumptech.glide.load.engine.executor.GlideExecutor.newSourceExecutor
 import com.bumptech.glide.load.model.GlideUrl
+import jp.juggler.emoji.EmojiMap
 import jp.juggler.subwaytooter.api.TootApiClient
-import jp.juggler.subwaytooter.api.entity.TootAttachment
 import jp.juggler.subwaytooter.table.*
 import jp.juggler.subwaytooter.util.CustomEmojiCache
 import jp.juggler.subwaytooter.util.CustomEmojiLister
@@ -34,6 +27,7 @@ import jp.juggler.subwaytooter.util.ProgressResponseBody
 import jp.juggler.util.*
 import okhttp3.*
 import org.conscrypt.Conscrypt
+import ru.gildor.coroutines.okhttp.await
 import java.io.File
 import java.io.InputStream
 import java.net.CookieHandler
@@ -41,22 +35,15 @@ import java.net.CookieManager
 import java.net.CookiePolicy
 import java.security.Security
 import java.util.*
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
-import java.util.regex.Pattern
 import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.pow
 
 class App1 : Application() {
 	
 	override fun onCreate() {
 		log.d("onCreate")
 		super.onCreate()
-		prepare(applicationContext)
+		prepare(applicationContext, "App1.onCreate")
 	}
 	
 	override fun onTerminate() {
@@ -131,8 +118,15 @@ class App1 : Application() {
 		// 2019/12/17 43=> 44 SavedAccount テーブルに項目追加。
 		// 2019/12/18 44=> 45 SavedAccount テーブルに項目追加。
 		// 2019/12/18 44=> 46 SavedAccount テーブルに項目追加。
+		// 2020/6/8 46 => 54 別ブランチで色々してた。このブランチには影響ないが onDowngrade()を実装してないので上げてしまう
+		// 2020/7/19 54=>55 UserRelation テーブルに項目追加。
+		// 2020/9/7 55=>56 SavedAccountテーブルにCOL_DOMAINを追加。
+		// 2020/9/20 56=>57 SavedAccountテーブルに項目追加
+		// 2020/9/20 57=>58 UserRelationテーブルに項目追加
+		// 2021/2/10 58=>59 SavedAccountテーブルに項目追加
+		// 2021/5/11 59=>60 SavedAccountテーブルに項目追加
 		
-		internal const val DB_VERSION = 46
+		internal const val DB_VERSION = 60
 		
 		private val tableList = arrayOf(
 			LogData,
@@ -215,7 +209,7 @@ class App1 : Application() {
 		//		return maxSize * 1024;
 		//	}
 		
-		val reNotAllowedInUserAgent : Pattern = Pattern.compile("[^\\x21-\\x7e]+")
+		val reNotAllowedInUserAgent = "[^\\x21-\\x7e]+".asciiPattern()
 		
 		val userAgentDefault =
 			"SubwayTooter/${BuildConfig.VERSION_NAME} Android/${Build.VERSION.RELEASE}"
@@ -223,7 +217,8 @@ class App1 : Application() {
 		private fun getUserAgent() : String {
 			val userAgentCustom = Pref.spUserAgent(pref)
 			return when {
-				userAgentCustom.isNotEmpty() && ! reNotAllowedInUserAgent.matcher(userAgentCustom).find() -> userAgentCustom
+				userAgentCustom.isNotEmpty() && ! reNotAllowedInUserAgent.matcher(userAgentCustom)
+					.find() -> userAgentCustom
 				else -> userAgentDefault
 			}
 		}
@@ -285,7 +280,7 @@ class App1 : Application() {
 		
 		lateinit var pref : SharedPreferences
 		
-		lateinit var task_executor : ThreadPoolExecutor
+		// lateinit var task_executor : ThreadPoolExecutor
 		
 		@SuppressLint("StaticFieldLeak")
 		lateinit var custom_emoji_cache : CustomEmojiCache
@@ -293,9 +288,14 @@ class App1 : Application() {
 		@SuppressLint("StaticFieldLeak")
 		lateinit var custom_emoji_lister : CustomEmojiLister
 		
-		fun prepare(app_context : Context) : AppState {
+		fun prepare(app_context : Context, caller : String) : AppState {
 			var state = appStateX
 			if(state != null) return state
+
+			log.d("initialize AppState. caller=$caller")
+
+			// initialize EmojiMap
+			EmojiMap.load(app_context)
 			
 			// initialize Conscrypt
 			Security.insertProviderAt(
@@ -305,7 +305,7 @@ class App1 : Application() {
 			
 			initializeFont()
 			
-			pref = Pref.pref(app_context)
+			pref = app_context.pref()
 			
 			run {
 				
@@ -313,35 +313,35 @@ class App1 : Application() {
 				// preferring to have 1 less than the CPU count to avoid saturating
 				// the CPU with background work
 				
-				val CPU_COUNT = Runtime.getRuntime().availableProcessors()
-				val CORE_POOL_SIZE = max(2, min(CPU_COUNT - 1, 4))
-				val MAXIMUM_POOL_SIZE = CPU_COUNT * 2 + 1
-				val KEEP_ALIVE_SECONDS = 30
+				//				val CPU_COUNT = Runtime.getRuntime().availableProcessors()
+				//				val CORE_POOL_SIZE = max(2, min(CPU_COUNT - 1, 4))
+				//				val MAXIMUM_POOL_SIZE = CPU_COUNT * 2 + 1
+				//				val KEEP_ALIVE_SECONDS = 30
 				
-				// デフォルトだとキューはmax128で、溢れることがある
-				val sPoolWorkQueue = LinkedBlockingQueue<Runnable>(999)
+				//				// デフォルトだとキューはmax128で、溢れることがある
+				//				val sPoolWorkQueue = LinkedBlockingQueue<Runnable>(999)
+				//
+				//				val sThreadFactory = object : ThreadFactory {
+				//					private val mCount = AtomicInteger(1)
+				//
+				//					override fun newThread(r : Runnable) : Thread {
+				//						return Thread(r, "SubwayTooterTask #" + mCount.getAndIncrement())
+				//					}
+				//				}
 				
-				val sThreadFactory = object : ThreadFactory {
-					private val mCount = AtomicInteger(1)
-					
-					override fun newThread(r : Runnable) : Thread {
-						return Thread(r, "SubwayTooterTask #" + mCount.getAndIncrement())
-					}
-				}
-				
-				task_executor = ThreadPoolExecutor(
-					CORE_POOL_SIZE  // pool size
-					, MAXIMUM_POOL_SIZE // max pool size
-					, KEEP_ALIVE_SECONDS.toLong() // keep-alive-seconds
-					, TimeUnit.SECONDS // unit of keep-alive-seconds
-					, sPoolWorkQueue, sThreadFactory
-				)
-				
-				task_executor.allowCoreThreadTimeOut(true)
+				//				task_executor = ThreadPoolExecutor(
+				//					CORE_POOL_SIZE  // pool size
+				//					, MAXIMUM_POOL_SIZE // max pool size
+				//					, KEEP_ALIVE_SECONDS.toLong() // keep-alive-seconds
+				//					, TimeUnit.SECONDS // unit of keep-alive-seconds
+				//					, sPoolWorkQueue, sThreadFactory
+				//				)
+				//
+				//				task_executor.allowCoreThreadTimeOut(true)
 			}
 			
 			
-			log.d("prepareDB")
+			log.d("prepareDB 1")
 			db_open_helper = DBOpenHelper(app_context)
 			
 			//			if( BuildConfig.DEBUG){
@@ -349,6 +349,7 @@ class App1 : Application() {
 			//				db_open_helper.onCreate( db );
 			//			}
 			
+			log.d("prepareDB 2")
 			val now = System.currentTimeMillis()
 			AcctSet.deleteOld(now)
 			UserRelation.deleteOld(now)
@@ -368,9 +369,10 @@ class App1 : Application() {
 			//			);
 			//		}
 			
+			log.d("create okhttp client")
 			run {
 				// API用のHTTP設定はキャッシュを使わない
-				ok_http_client = prepareOkHttp(30, 60)
+				ok_http_client = prepareOkHttp(60, 60)
 					.build()
 				
 				// ディスクキャッシュ
@@ -378,7 +380,7 @@ class App1 : Application() {
 				val cache = Cache(cacheDir, 30000000L)
 				
 				// カスタム絵文字用のHTTP設定はキャッシュを使う
-				ok_http_client2 = prepareOkHttp(30, 60)
+				ok_http_client2 = prepareOkHttp(60, 60)
 					.cache(cache)
 					.build()
 				
@@ -389,23 +391,33 @@ class App1 : Application() {
 					.build()
 			}
 			
-			custom_emoji_cache = CustomEmojiCache(app_context)
+			val handler = Handler(app_context.mainLooper)
 			
-			custom_emoji_lister = CustomEmojiLister(app_context)
+			log.d("create custom emoji cache.")
+			custom_emoji_cache = CustomEmojiCache(app_context, handler)
+			custom_emoji_lister = CustomEmojiLister(app_context, handler)
 			
 			ColumnType.dump()
 			
+			log.d("create  AppState.")
 			
-			state = AppState(app_context, pref)
+			state = AppState(app_context, handler, pref)
 			appStateX = state
+			
+			// getAppState()を使える状態にしてからカラム一覧をロードする
+			log.d("load column list...")
+			state.loadColumnList()
+			
+			log.d("prepare() complete! caller=$caller")
+			
 			return state
 		}
 		
 		@SuppressLint("StaticFieldLeak")
 		private var appStateX : AppState? = null
 		
-		fun getAppState(context : Context) : AppState {
-			return prepare(context.applicationContext)
+		fun getAppState(context : Context, caller : String = "getAppState") : AppState {
+			return prepare(context.applicationContext, caller)
 		}
 		
 		fun sound(item : HighlightWord) {
@@ -438,8 +450,14 @@ class App1 : Application() {
 			val catcher = GlideExecutor.UncaughtThrowableStrategy { ex ->
 				log.trace(ex)
 			}
-			builder.setDiskCacheExecutor(newDiskCacheExecutor(catcher))
-			builder.setSourceExecutor(newSourceExecutor(catcher))
+			builder.setDiskCacheExecutor(
+				GlideExecutor.newDiskCacheBuilder()
+					.setUncaughtThrowableStrategy(catcher).build()
+			)
+			builder.setSourceExecutor(
+				GlideExecutor.newSourceBuilder()
+					.setUncaughtThrowableStrategy(catcher).build()
+			)
 			
 			builder.setDiskCache(InternalCacheDiskCacheFactory(context, 10 * 1024 * 1024))
 			
@@ -490,30 +508,30 @@ class App1 : Application() {
 		}
 		
 		fun setActivityTheme(
-			activity : Activity,
+			activity : AppCompatActivity,
 			noActionBar : Boolean = false,
-			forceDark :Boolean = false
+			forceDark : Boolean = false
 		) {
 			
-			prepare(activity.applicationContext)
+			prepare(activity.applicationContext, "setActivityTheme")
 			
 			val theme_idx = Pref.ipUiTheme(pref)
 			activity.setTheme(
-				if( forceDark || theme_idx ==1){
+				if(forceDark || theme_idx == 1) {
 					if(noActionBar) R.style.AppTheme_Dark_NoActionBar else R.style.AppTheme_Dark
-				}else{
+				} else {
 					if(noActionBar) R.style.AppTheme_Light_NoActionBar else R.style.AppTheme_Light
 				}
 			)
 			
-			setStatusBarColor(activity,forceDark=forceDark)
+			activity.setStatusBarColor(forceDark = forceDark)
 		}
 		
 		internal val CACHE_CONTROL = CacheControl.Builder()
 			.maxAge(1, TimeUnit.DAYS) // キャッシュが新鮮であると考えられる時間
 			.build()
 		
-		fun getHttpCached(url : String) : ByteArray? {
+		suspend fun getHttpCached(url : String) : ByteArray? {
 			val response : Response
 			
 			try {
@@ -522,7 +540,7 @@ class App1 : Application() {
 					.url(url)
 				
 				val call = ok_http_client2.newCall(request_builder.build())
-				response = call.execute()
+				response = call.await()
 			} catch(ex : Throwable) {
 				log.e(ex, "getHttp network error.")
 				return null
@@ -542,8 +560,9 @@ class App1 : Application() {
 			
 		}
 		
-		fun getHttpCachedString(
+		suspend fun getHttpCachedString(
 			url : String,
+			accessInfo : SavedAccount? = null,
 			builderBlock : (Request.Builder) -> Unit = {}
 		) : String? {
 			val response : Response
@@ -553,10 +572,15 @@ class App1 : Application() {
 					.url(url)
 					.cacheControl(CACHE_CONTROL)
 				
+				val access_token = accessInfo?.getAccessToken()
+				if(access_token?.isNotEmpty() == true) {
+					request_builder.header("Authorization", "Bearer $access_token")
+				}
+				
 				builderBlock(request_builder)
 				
 				val call = ok_http_client2.newCall(request_builder.build())
-				response = call.execute()
+				response = call.await()
 			} catch(ex : Throwable) {
 				log.e(ex, "getHttp network error.")
 				return null
@@ -576,72 +600,6 @@ class App1 : Application() {
 			
 		}
 		
-		fun openBrowser(context : Context, uri : Uri?) {
-			try {
-				uri ?: return
-				val intent = Intent(Intent.ACTION_VIEW, uri)
-				context.startActivity(intent)
-			} catch(ex : Throwable) {
-				log.trace(ex, "openBrowser")
-				showToast(context, true, "missing web browser")
-			}
-		}
-		
-		fun openBrowser(context : Context, url : String?) =
-			openBrowser(context, url.mayUri())
-		
-		// Chrome Custom Tab を開く
-		fun openCustomTab(activity : Activity, url : String) {
-			try {
-				if(Pref.bpDontUseCustomTabs(pref)) {
-					openBrowser(activity, url)
-				} else {
-					
-					if(url.startsWith("http") && Pref.bpPriorChrome(pref)) {
-						try {
-							// 初回はChrome指定で試す
-							val customTabsIntent = CustomTabsIntent.Builder()
-								.setToolbarColor(
-									getAttributeColor(
-										activity,
-										R.attr.colorPrimary
-									)
-								)
-								.setShowTitle(true)
-								.build()
-							customTabsIntent.intent.component = ComponentName(
-								"com.android.chrome",
-								"com.google.android.apps.chrome.Main"
-							)
-							customTabsIntent.launchUrl(activity, url.toUri())
-							return
-						} catch(ex2 : Throwable) {
-							log.e(ex2, "openChromeTab: missing chrome. retry to other application.")
-						}
-						
-					}
-					
-					// Chromeがないようなのでcomponent指定なしでリトライ
-					CustomTabsIntent.Builder()
-						.setToolbarColor(getAttributeColor(activity, R.attr.colorPrimary))
-						.setShowTitle(true)
-						.build()
-						.launchUrl(activity, url.toUri())
-					
-				}
-			} catch(ex : Throwable) {
-				log.trace(ex)
-				val scheme = url.mayUri()?.scheme ?: url
-				showToast(activity, true, "can't open browser app for %s", scheme)
-			}
-			
-		}
-		
-		fun openCustomTab(activity : Activity, ta : TootAttachment) {
-			val url = ta.getLargeUrl(pref) ?: return
-			openCustomTab(activity, url)
-		}
-		
 		// https://developer.android.com/preview/features/gesturalnav?hl=ja
 		fun initEdgeToEdge(@Suppress("UNUSED_PARAMETER") activity : Activity) {
 			//			if(Build.VERSION.SDK_INT >= 29){
@@ -653,93 +611,6 @@ class App1 : Application() {
 			//					insets.consumeSystemWindowInsets()
 			//				}
 			//			}
-		}
-		
-		private fun rgbToLab(rgb : Int) : Triple<Float, Float, Float> {
-			
-			fun Int.revGamma() : Float {
-				val v = toFloat() / 255f
-				return when {
-					v > 0.04045f -> ((v + 0.055f) / 1.055f).pow(2.4f)
-					else -> v / 12.92f
-				}
-			}
-			
-			val r = Color.red(rgb).revGamma()
-			val g = Color.green(rgb).revGamma()
-			val b = Color.blue(rgb).revGamma()
-			
-			//https://en.wikipedia.org/wiki/Lab_color_space#CIELAB-CIEXYZ_conversions
-			
-			fun f(src : Float, k : Float) : Float {
-				val v = src * k
-				return when {
-					v > 0.008856f -> v.pow(1f / 3f)
-					else -> (7.787f * v) + (4f / 29f)
-				}
-			}
-			
-			val x = f(r * 0.4124f + g * 0.3576f + b * 0.1805f, 100f / 95.047f)
-			val y = f(r * 0.2126f + g * 0.7152f + b * 0.0722f, 100f / 100f)
-			val z = f(r * 0.0193f + g * 0.1192f + b * 0.9505f, 100f / 108.883f)
-			
-			return Triple(
-				(116 * y) - 16, // L
-				500 * (x - y), // a
-				200 * (y - z) //b
-			)
-		}
-		
-		fun setStatusBarColor(activity : Activity,forceDark:Boolean=false ) {
-			
-			activity.window?.apply {
-				
-				// 古い端末ではナビゲーションバーのアイコン色を設定できないため
-				// メディアビューア画面ではステータスバーやナビゲーションバーの色を設定しない…
-				if( forceDark && Build.VERSION.SDK_INT < 26 ) return
-
-				clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
-				clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
-				addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-				
-				var c = when {
-					forceDark -> Color.BLACK
-					else -> Pref.ipStatusBarColor(pref).notZero()
-						?: getAttributeColor(activity,R.attr.colorPrimaryDark)
-				}
-				statusBarColor = c or Color.BLACK
-				
-				if(Build.VERSION.SDK_INT >= 23) {
-					decorView.systemUiVisibility =
-						if( rgbToLab(c).first >= 50f) {
-							//Dark Text to show up on your light status bar
-							decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-						} else {
-							//Light Text to show up on your dark status bar
-							decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-						}
-				}
-				
-				c = when {
-					forceDark -> Color.BLACK
-					else -> Pref.ipNavigationBarColor(pref)
-				}
-				
-				if(c != 0) {
-					navigationBarColor = c or Color.BLACK
-					
-					if(Build.VERSION.SDK_INT >= 26) {
-						decorView.systemUiVisibility =
-							if(rgbToLab(c).first >= 50f) {
-								//Dark Text to show up on your light status bar
-								decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-							} else {
-								//Light Text to show up on your dark status bar
-								decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
-							}
-					}
-				} // else: need restart app.
-			}
 		}
 	}
 }

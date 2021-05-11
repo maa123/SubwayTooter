@@ -4,8 +4,10 @@ package jp.juggler.subwaytooter.dialog
 
 import android.app.ProgressDialog
 import android.content.Context
+import jp.juggler.util.runOnMainLooper
 
 class ProgressDialogEx(context : Context) : ProgressDialog(context) {
+
 	companion object {
 		const val STYLE_SPINNER = ProgressDialog.STYLE_SPINNER
 		const val STYLE_HORIZONTAL = ProgressDialog.STYLE_HORIZONTAL
@@ -17,7 +19,6 @@ class ProgressDialogEx(context : Context) : ProgressDialog(context) {
 			isIndeterminate = value
 		}
 	
-	fun setMessageEx(msg : CharSequence?) =
-		setMessage(msg)
-	
+	fun setMessageEx(msg : CharSequence?) = runOnMainLooper { super.setMessage(msg) }
+	// synchronizedの中から呼ばれることがあるので、コルーチンではなくHandlerで制御する
 }

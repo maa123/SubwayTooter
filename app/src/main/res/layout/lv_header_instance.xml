@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/llInstanceInformation"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -94,7 +92,25 @@
         <TextView
             android:id="@+id/tvLanguages"
             style="@style/setting_horizontal_stretch"
-            android:background="@drawable/btn_bg_transparent"
+            android:background="@drawable/btn_bg_transparent_round6dp"
+            android:gravity="start|center_vertical"
+            android:textAllCaps="false"
+            />
+    </LinearLayout>
+
+    <View style="@style/setting_divider"/>
+
+    <TextView
+        style="@style/setting_row_label"
+        android:text="@string/invites_enabled"
+        />
+
+    <LinearLayout style="@style/setting_row_form">
+
+        <TextView
+            android:id="@+id/tvInvitesEnabled"
+            style="@style/setting_horizontal_stretch"
+            android:background="@drawable/btn_bg_transparent_round6dp"
             android:gravity="start|center_vertical"
             android:textAllCaps="false"
             />

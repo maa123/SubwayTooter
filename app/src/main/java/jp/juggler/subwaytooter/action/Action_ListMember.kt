@@ -1,7 +1,7 @@
 package jp.juggler.subwaytooter.action
 
+import android.app.AlertDialog
 import jp.juggler.subwaytooter.ActMain
-import jp.juggler.subwaytooter.App1
 import jp.juggler.subwaytooter.R
 import jp.juggler.subwaytooter.api.*
 import jp.juggler.subwaytooter.api.entity.*
@@ -9,15 +9,14 @@ import jp.juggler.subwaytooter.dialog.DlgConfirm
 import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.util.*
 import okhttp3.Request
-import org.json.JSONArray
-import org.json.JSONObject
 import java.util.regex.Pattern
 
 object Action_ListMember {
 	
-	private val reFollowError = Pattern.compile("follow", Pattern.CASE_INSENSITIVE)
+	private val reFollowError = "follow".asciiPattern(Pattern.CASE_INSENSITIVE)
 	
-	interface Callback {
+	fun interface Callback {
+		
 		fun onListMemberUpdated(willRegistered : Boolean, bSuccess : Boolean)
 	}
 	
@@ -29,13 +28,9 @@ object Action_ListMember {
 		bFollow : Boolean = false,
 		callback : Callback?
 	) {
-		if(access_info.isMe(local_who)) {
-			showToast(activity, false, R.string.it_is_you)
-			return
-		}
 		
 		TootTaskRunner(activity).run(access_info, object : TootTask {
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				
 				val parser = TootParser(activity, access_info)
 				
@@ -44,15 +39,25 @@ object Action_ListMember {
 				return if(access_info.isMisskey) {
 					// misskeyのリストはフォロー無関係
 					
-					val params = access_info.putMisskeyApiToken(JSONObject())
-						.put("listId", list_id)
-						.put("userId", local_who.id)
-					
-					client.request("/api/users/lists/push", params.toPostRequestBuilder())
+					client.request(
+						"/api/users/lists/push",
+						access_info.putMisskeyApiToken().apply {
+							put("listId", list_id)
+							put("userId", local_who.id)
+							
+						}.toPostRequestBuilder()
+					)
 					// 204 no content
 				} else {
-					if(bFollow) {
-						
+					
+					val isMe = access_info.isMe(local_who)
+					if(isMe) {
+						val (ti, ri) = TootInstance.get(client)
+						if(ti == null) return ri
+						if(! ti.versionGE(TootInstance.VERSION_3_1_0_rc1)) {
+							return TootApiResult(activity.getString(R.string.it_is_you))
+						}
+					} else if(bFollow) {
 						// リモートユーザの解決
 						if(! access_info.isLocalUser(local_who)) {
 							val (r2, ar) = client.syncAccountByAcct(access_info, local_who.acct)
@@ -72,6 +77,7 @@ object Action_ListMember {
 							?: return TootApiResult("parse error.")
 						
 						if(! relation.following) {
+							@Suppress("ControlFlowWithEmptyBody")
 							if(relation.requested) {
 								return TootApiResult(activity.getString(R.string.cant_add_list_follow_requesting))
 							} else {
@@ -85,11 +91,11 @@ object Action_ListMember {
 					
 					client.request(
 						"/api/v1/lists/$list_id/accounts",
-						JSONObject().apply {
+						jsonObject {
 							put(
 								"account_ids",
-								JSONArray().apply {
-									put(userId.toString())
+								jsonArray {
+									add(userId.toString())
 								}
 							)
 						}
@@ -98,7 +104,7 @@ object Action_ListMember {
 				}
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				var bSuccess = false
 				
 				try {
@@ -106,14 +112,14 @@ object Action_ListMember {
 					if(result == null) return  // cancelled.
 					
 					if(result.jsonObject != null) {
-						for(column in App1.getAppState(activity).column_list) {
+						for(column in activity.app_state.columnList) {
 							// リストメンバー追加イベントをカラムに伝達
 							column.onListMemberUpdated(access_info, list_id, local_who, true)
 						}
 						// フォロー状態の更新を表示に反映させる
 						if(bFollow) activity.showColumnMatchAccount(access_info)
 						
-						showToast(activity, false, R.string.list_member_added)
+						activity.showToast(false, R.string.list_member_added)
 						
 						bSuccess = true
 						
@@ -134,7 +140,7 @@ object Action_ListMember {
 										access_info.getFullAcct(local_who)
 									)
 								) {
-									Action_ListMember.add(
+									add(
 										activity,
 										access_info,
 										list_id,
@@ -144,7 +150,7 @@ object Action_ListMember {
 									)
 								}
 							} else {
-								android.app.AlertDialog.Builder(activity)
+								AlertDialog.Builder(activity)
 									.setCancelable(true)
 									.setMessage(R.string.cant_add_list_follow_requesting)
 									.setNeutralButton(R.string.close, null)
@@ -153,7 +159,7 @@ object Action_ListMember {
 							return
 						}
 						
-						showToast(activity, true, error)
+						activity.showToast(true, error)
 						
 					}
 				} finally {
@@ -172,13 +178,14 @@ object Action_ListMember {
 		callback : Callback?
 	) {
 		TootTaskRunner(activity).run(access_info, object : TootTask {
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				return if(access_info.isMisskey) {
 					client.request(
 						"/api/users/lists/pull",
-						access_info.putMisskeyApiToken()
-							.put("listId", list_id.toString())
-							.put("userId", local_who.id.toString())
+						access_info.putMisskeyApiToken().apply {
+							put("listId", list_id.toString())
+							put("userId", local_who.id.toString())
+						}
 							.toPostRequestBuilder()
 					)
 				} else {
@@ -189,7 +196,7 @@ object Action_ListMember {
 				}
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				var bSuccess = false
 				
 				try {
@@ -198,16 +205,16 @@ object Action_ListMember {
 					
 					if(result.jsonObject != null) {
 						
-						for(column in App1.getAppState(activity).column_list) {
+						for(column in activity.app_state.columnList) {
 							column.onListMemberUpdated(access_info, list_id, local_who, false)
 						}
 						
-						showToast(activity, false, R.string.delete_succeeded)
+						activity.showToast(false, R.string.delete_succeeded)
 						
 						bSuccess = true
 						
 					} else {
-						showToast(activity, false, result.error)
+						activity.showToast(false, result.error)
 					}
 				} finally {
 					callback?.onListMemberUpdated(false, bSuccess)

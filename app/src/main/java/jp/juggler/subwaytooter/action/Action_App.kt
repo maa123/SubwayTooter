@@ -3,7 +3,6 @@ package jp.juggler.subwaytooter.action
 import android.app.AlertDialog
 import jp.juggler.subwaytooter.ActColumnList
 import jp.juggler.subwaytooter.ActMain
-import jp.juggler.subwaytooter.App1
 import jp.juggler.subwaytooter.R
 import jp.juggler.subwaytooter.api.entity.TootApplication
 import jp.juggler.subwaytooter.table.MutedApp
@@ -34,8 +33,8 @@ object Action_App {
 		}
 		
 		MutedApp.save(application.name)
-		App1.getAppState(activity).onMuteUpdated()
-		showToast(activity, false, R.string.app_was_muted)
+		activity.app_state.onMuteUpdated()
+		activity.showToast(false, R.string.app_was_muted)
 	}
 	
 }

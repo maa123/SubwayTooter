@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.SharedPreferences
 import android.os.Handler
-import androidx.core.content.ContextCompat
 import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.view.Gravity
@@ -13,14 +12,17 @@ import android.widget.CheckedTextView
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.PopupWindow
-import jp.juggler.subwaytooter.Pref
+import androidx.core.content.ContextCompat
+import jp.juggler.subwaytooter.App1
 import jp.juggler.subwaytooter.R
+import jp.juggler.subwaytooter.api.entity.Acct
 import jp.juggler.subwaytooter.view.MyEditText
 import jp.juggler.util.LogCategory
-import jp.juggler.util.getAttributeColor
+import jp.juggler.util.asciiPattern
+import jp.juggler.util.attrColor
 import jp.juggler.util.groupEx
 import java.util.*
-import java.util.regex.Pattern
+import kotlin.math.min
 
 @SuppressLint("InflateParams")
 internal class PopupAutoCompleteAcct(
@@ -35,7 +37,7 @@ internal class PopupAutoCompleteAcct(
 		internal val log = LogCategory("PopupAutoCompleteAcct")
 		
 		// 絵文字ショートコードにマッチするとても雑な正規表現
-		private val reLastShortCode = Pattern.compile(""":([^\s:]+):\z""")
+		private val reLastShortCode = """:([^\s:]+):\z""".asciiPattern()
 	}
 	
 	private val acct_popup : PopupWindow
@@ -44,7 +46,7 @@ internal class PopupAutoCompleteAcct(
 	private val popup_width : Int
 	val handler : Handler
 	
-	private val pref : SharedPreferences = Pref.pref(activity)
+	private val pref : SharedPreferences = App1.pref
 	
 	private var popup_rows : Int = 0
 	
@@ -61,7 +63,7 @@ internal class PopupAutoCompleteAcct(
 	
 	init {
 		this.density = activity.resources.displayMetrics.density
-		this.handler = Handler(activity.mainLooper)
+		this.handler = App1.getAppState(activity, "PopupAutoCompleteAcct.ctor").handler
 		
 		popup_width = (0.5f + 240f * density).toInt()
 		
@@ -95,7 +97,7 @@ internal class PopupAutoCompleteAcct(
 		run {
 			val v = activity.layoutInflater
 				.inflate(R.layout.lv_spinner_dropdown, llItems, false) as CheckedTextView
-			v.setTextColor(getAttributeColor(activity, android.R.attr.textColorPrimary))
+			v.setTextColor(activity.attrColor(android.R.attr.textColorPrimary))
 			v.setText(R.string.close)
 			v.setOnClickListener { acct_popup.dismiss() }
 			llItems.addView(v)
@@ -105,7 +107,7 @@ internal class PopupAutoCompleteAcct(
 		if(picker_caption != null && picker_callback != null) {
 			val v = activity.layoutInflater
 				.inflate(R.layout.lv_spinner_dropdown, llItems, false) as CheckedTextView
-			v.setTextColor(getAttributeColor(activity, android.R.attr.textColorPrimary))
+			v.setTextColor(activity.attrColor(android.R.attr.textColorPrimary))
 			v.text = picker_caption
 			v.setOnClickListener {
 				acct_popup.dismiss()
@@ -123,7 +125,7 @@ internal class PopupAutoCompleteAcct(
 				val acct = acct_list[i]
 				val v = activity.layoutInflater
 					.inflate(R.layout.lv_spinner_dropdown, llItems, false) as CheckedTextView
-				v.setTextColor(getAttributeColor(activity, android.R.attr.textColorPrimary))
+				v.setTextColor(activity.attrColor(android.R.attr.textColorPrimary))
 				v.text = acct
 				if(acct is Spannable) {
 					NetworkEmojiInvalidator(handler, v).register(acct)
@@ -135,20 +137,25 @@ internal class PopupAutoCompleteAcct(
 					val sb = SpannableStringBuilder()
 					
 					val src_length = editable.length
-					start = Math.min(src_length, sel_start)
-					val end = Math.min(src_length, sel_end)
+					start = min(src_length, sel_start)
+					val end = min(src_length, sel_end)
 					sb.append(editable.subSequence(0, start))
 					val remain = editable.subSequence(end, src_length)
 					
 					if(acct[0] == ' ') {
 						// 絵文字ショートコード
-						val separator =  EmojiDecoder.customEmojiSeparator(pref)
+						val separator = EmojiDecoder.customEmojiSeparator(pref)
 						if(! EmojiDecoder.canStartShortCode(sb, start)) sb.append(separator)
 						sb.append(findShortCode(acct.toString()))
 						// セパレータにZWSPを使う設定なら、補完した次の位置にもZWSPを追加する。連続して入力補完できるようになる。
-						if( separator != ' ') sb.append(separator)
+						if(separator != ' ') sb.append(separator)
+					} else if(acct[0] == '@' && null != acct.find { it >= 0x80.toChar() }) {
+						// @user@host IDNドメインを含む
+						// 直後に空白を付与する
+						sb.append("@" + Acct.parse(acct.toString().substring(1)).ascii).append(" ")
 					} else {
-						// @user@host, #hashtag
+						// @user@host
+						// #hashtag
 						// 直後に空白を付与する
 						sb.append(acct).append(" ")
 					}
@@ -172,7 +179,7 @@ internal class PopupAutoCompleteAcct(
 	
 	private fun findShortCode(acct : String) : String {
 		val m = reLastShortCode.matcher(acct)
-		if(m.find()) return m.groupEx(0)!!
+		if(m.find()) return m.groupEx(0) !!
 		return acct
 	}
 	

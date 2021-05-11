@@ -14,17 +14,14 @@ import com.woxthebox.draglistview.DragItemAdapter
 import com.woxthebox.draglistview.DragListView
 import com.woxthebox.draglistview.swipe.ListSwipeHelper
 import com.woxthebox.draglistview.swipe.ListSwipeItem
-import jp.juggler.util.LogCategory
-import jp.juggler.util.activity
-import jp.juggler.util.getAttributeColor
-import jp.juggler.util.showToast
-import org.json.JSONArray
-import org.json.JSONObject
+import jp.juggler.subwaytooter.api.entity.Acct
+import jp.juggler.util.*
 import java.util.*
 
 class ActColumnList : AppCompatActivity() {
 	
 	companion object {
+		
 		private val log = LogCategory("ActColumnList")
 		internal const val TMP_FILE_COLUMN_LIST = "tmp_column_list"
 		
@@ -62,15 +59,7 @@ class ActColumnList : AppCompatActivity() {
 		
 		outState.putInt(EXTRA_SELECTION, old_selection)
 		
-		//
-		val array = JSONArray()
-		val item_list = listAdapter.itemList
-		var i = 0
-		val ie = item_list.size
-		while(i < ie) {
-			array.put(item_list[i].json)
-			++ i
-		}
+		val array = listAdapter.itemList.map { it.json }.toJsonArray()
 		AppState.saveColumnList(this, TMP_FILE_COLUMN_LIST, array)
 	}
 	
@@ -131,11 +120,7 @@ class ActColumnList : AppCompatActivity() {
 				if(swipedDirection == ListSwipeItem.SwipeDirection.LEFT) {
 					val adapterItem = item.tag as MyItem
 					if(adapterItem.json.optBoolean(Column.KEY_DONT_CLOSE, false)) {
-						showToast(
-							this@ActColumnList,
-							false,
-							R.string.column_has_dont_close_option
-						)
+						showToast(false, R.string.column_has_dont_close_option)
 						listView.resetSwipedViews(null)
 						return
 					}
@@ -151,27 +136,19 @@ class ActColumnList : AppCompatActivity() {
 		
 		val tmp_list = ArrayList<MyItem>()
 		try {
-			val array = AppState.loadColumnList(this, TMP_FILE_COLUMN_LIST)
-			if(array != null) {
-				var i = 0
-				val ie = array.length()
-				while(i < ie) {
+			AppState.loadColumnList(this, TMP_FILE_COLUMN_LIST)
+				?.objectList()
+				?.forEachIndexed { index, src ->
 					try {
-						val src = array.optJSONObject(i)
-						val item = MyItem(src, i.toLong(), this)
-						if(src != null) {
-							tmp_list.add(item)
-							if(old_selection == item.old_index) {
-								item.setOldSelection(true)
-							}
+						val item = MyItem(src, index.toLong(), this)
+						tmp_list.add(item)
+						if(old_selection == item.old_index) {
+							item.setOldSelection(true)
 						}
 					} catch(ex : Throwable) {
 						log.trace(ex)
 					}
-					
-					++ i
 				}
-			}
 		} catch(ex : Throwable) {
 			log.trace(ex)
 		}
@@ -214,24 +191,17 @@ class ActColumnList : AppCompatActivity() {
 	}
 	
 	// リスト要素のデータ
-	internal class MyItem(val json : JSONObject, val id : Long, context : Context) {
+	internal class MyItem(val json : JsonObject, val id : Long, context : Context) {
 		
 		val name : String = json.optString(Column.KEY_COLUMN_NAME)
-		val acct : String = json.optString(Column.KEY_COLUMN_ACCESS)
+		val acct : Acct = Acct.parse(json.optString(Column.KEY_COLUMN_ACCESS_ACCT))
+		val acct_name : String = json.optString(Column.KEY_COLUMN_ACCESS_STR)
 		val old_index = json.optInt(Column.KEY_OLD_INDEX)
 		val type = ColumnType.parse(json.optInt(Column.KEY_TYPE))
-		val acct_color_fg : Int
-		val acct_color_bg : Int
+		val acct_color_bg = json.optInt(Column.KEY_COLUMN_ACCESS_COLOR_BG, 0)
+		val acct_color_fg = json.optInt(Column.KEY_COLUMN_ACCESS_COLOR, 0)
+			.notZero() ?: context.attrColor(R.attr.colorColumnListItemText)
 		var bOldSelection : Boolean = false
-		
-		init {
-			var c = json.optInt(Column.KEY_COLUMN_ACCESS_COLOR, 0)
-			this.acct_color_fg =
-				if(c != 0) c else getAttributeColor(context, R.attr.colorColumnListItemText)
-			
-			c = json.optInt(Column.KEY_COLUMN_ACCESS_COLOR_BG, 0)
-			this.acct_color_bg = c
-		}
 		
 		fun setOldSelection(b : Boolean) {
 			bOldSelection = b
@@ -261,7 +231,7 @@ class ActColumnList : AppCompatActivity() {
 		fun bind(item : MyItem) {
 			itemView.tag = item // itemView は親クラスのメンバ変数
 			ivBookmark.visibility = if(item.bOldSelection) View.VISIBLE else View.INVISIBLE
-			tvAccess.text = item.acct
+			tvAccess.text = item.acct_name
 			tvAccess.setTextColor(item.acct_color_fg)
 			tvAccess.setBackgroundColor(item.acct_color_bg)
 			tvAccess.setPaddingRelative(acct_pad_lr, 0, acct_pad_lr, 0)
@@ -283,14 +253,14 @@ class ActColumnList : AppCompatActivity() {
 	}
 	
 	// ドラッグ操作中のデータ
-	private inner class MyDragItem internal constructor(context : Context, layoutId : Int) :
+	private inner class MyDragItem(context : Context, layoutId : Int) :
 		DragItem(context, layoutId) {
 		
 		override fun onBindDragView(clickedView : View, dragView : View) {
 			val item = clickedView.tag as MyItem
 			
 			var tv : TextView = dragView.findViewById(R.id.tvAccess)
-			tv.text = item.acct
+			tv.text = item.acct_name
 			tv.setTextColor(item.acct_color_fg)
 			tv.setBackgroundColor(item.acct_color_bg)
 			
@@ -303,19 +273,17 @@ class ActColumnList : AppCompatActivity() {
 			dragView.findViewById<View>(R.id.ivBookmark).visibility =
 				clickedView.findViewById<View>(R.id.ivBookmark).visibility
 			
-			dragView.findViewById<View>(R.id.item_layout).setBackgroundColor(
-				getAttributeColor(this@ActColumnList, R.attr.list_item_bg_pressed_dragged)
-			)
+			dragView.findViewById<View>(R.id.item_layout)
+				.setBackgroundColor(attrColor(R.attr.list_item_bg_pressed_dragged))
 		}
 	}
 	
-	private inner class MyListAdapter internal constructor() :
+	private inner class MyListAdapter :
 		DragItemAdapter<MyItem, MyViewHolder>() {
-		
 		
 		init {
 			setHasStableIds(true)
-			itemList = ArrayList<MyItem>()
+			itemList = ArrayList()
 		}
 		
 		override fun onCreateViewHolder(parent : ViewGroup, viewType : Int) : MyViewHolder {

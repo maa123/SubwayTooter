@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/viewRoot"
     android:layout_width="match_parent"
@@ -53,7 +54,7 @@
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:layout_marginEnd="8dp"
-                        android:background="@drawable/btn_bg_transparent"
+                        android:background="@drawable/btn_bg_transparent_round6dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -68,7 +69,7 @@
                         android:layout_width="40dp"
                         android:layout_height="40dp"
                         android:layout_marginStart="4dp"
-                        android:background="@drawable/btn_bg_transparent"
+                        android:background="@drawable/btn_bg_transparent_round6dp"
                         android:contentDescription="@string/delete"
                         android:gravity="center_vertical"
                         android:src="@drawable/ic_close"
@@ -76,10 +77,10 @@
                 </LinearLayout>
 
                 <CheckBox
-                    android:id="@+id/cbQuoteRenote"
+                    android:id="@+id/cbQuote"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/make_quote_renote" />
+                    android:text="@string/use_quote_toot" />
 
             </LinearLayout>
 
@@ -99,7 +100,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:gravity="center_vertical"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
@@ -119,48 +120,56 @@
                     android:id="@+id/ivMedia1"
                     android:layout_width="48dp"
                     android:layout_height="match_parent"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:scaleType="fitCenter" />
 
                 <jp.juggler.subwaytooter.view.MyNetworkImageView
                     android:id="@+id/ivMedia2"
                     android:layout_width="48dp"
                     android:layout_height="match_parent"
-                    android:layout_marginStart="4dp"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:scaleType="fitCenter" />
 
                 <jp.juggler.subwaytooter.view.MyNetworkImageView
                     android:id="@+id/ivMedia3"
                     android:layout_width="48dp"
                     android:layout_height="match_parent"
-                    android:layout_marginStart="4dp"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:scaleType="fitCenter" />
 
                 <jp.juggler.subwaytooter.view.MyNetworkImageView
                     android:id="@+id/ivMedia4"
                     android:layout_width="48dp"
                     android:layout_height="match_parent"
-                    android:layout_marginStart="4dp"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:scaleType="fitCenter" />
+            </LinearLayout>
+
+            <com.google.android.flexbox.FlexboxLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                app:flexWrap="wrap">
 
                 <CheckBox
                     android:id="@+id/cbNSFW"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="center_vertical|start"
-                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
                     android:text="@string/nsfw" />
-            </LinearLayout>
 
-            <CheckBox
-                android:id="@+id/cbContentWarning"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/content_warning" />
+                <CheckBox
+                    android:id="@+id/cbContentWarning"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical|start"
+                    android:text="@string/content_warning" />
+            </com.google.android.flexbox.FlexboxLayout>
 
             <FrameLayout
                 android:layout_width="match_parent"
@@ -194,7 +203,7 @@
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:layout_marginStart="8dp"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:contentDescription="@string/open_picker_emoji"
                     android:src="@drawable/ic_hashtag"
                     android:tint="?attr/colorVectorDrawable"
@@ -206,7 +215,7 @@
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:layout_marginStart="8dp"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:contentDescription="@string/open_picker_emoji"
                     android:src="@drawable/ic_face"
                     android:tint="?attr/colorVectorDrawable"
@@ -255,7 +264,7 @@
                     android:id="@+id/ibSchedule"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:contentDescription="@string/edit"
                     android:src="@drawable/ic_edit"
                     android:tint="?attr/colorVectorDrawable"
@@ -266,7 +275,7 @@
                     android:id="@+id/ibScheduleReset"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
-                    android:background="@drawable/btn_bg_transparent"
+                    android:background="@drawable/btn_bg_transparent_round6dp"
                     android:contentDescription="@string/reset"
                     android:src="@drawable/ic_close"
                     android:tint="?attr/colorVectorDrawable"
@@ -473,7 +482,7 @@
             android:id="@+id/btnAttachment"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:background="@drawable/btn_bg_transparent"
+            android:background="@drawable/btn_bg_transparent_round6dp"
             android:contentDescription="@string/media_attachment"
             android:src="@drawable/ic_clip"
             android:tint="?attr/colorVectorDrawable" />
@@ -483,7 +492,7 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:layout_marginStart="4dp"
-            android:background="@drawable/btn_bg_transparent"
+            android:background="@drawable/btn_bg_transparent_round6dp"
             android:contentDescription="@string/visibility"
             android:minWidth="48dp"
             android:minHeight="48dp"
@@ -495,7 +504,7 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:layout_marginStart="4dp"
-            android:background="@drawable/btn_bg_transparent"
+            android:background="@drawable/btn_bg_transparent_round6dp"
             android:contentDescription="@string/plugin"
             android:src="@drawable/ic_extension"
             android:tint="?attr/colorVectorDrawable" />
@@ -505,7 +514,7 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:layout_marginStart="4dp"
-            android:background="@drawable/btn_bg_transparent"
+            android:background="@drawable/btn_bg_transparent_round6dp"
             android:contentDescription="@string/more"
             android:src="@drawable/ic_more"
             android:tint="?attr/colorVectorDrawable"
@@ -532,7 +541,7 @@
             android:id="@+id/btnPost"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:background="@drawable/btn_bg_transparent"
+            android:background="@drawable/btn_bg_transparent_round6dp"
             android:contentDescription="@string/toot"
             android:src="@drawable/ic_send"
             android:tint="?attr/colorVectorDrawable"

@@ -4,7 +4,8 @@ import androidx.test.runner.AndroidJUnit4
 import android.test.mock.MockContext
 import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.table.SavedAccount
-import org.json.JSONObject
+import jp.juggler.util.JsonObject
+import jp.juggler.util.jsonObject
 
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -19,8 +20,8 @@ class TestDuplicateMap {
 		MockContext(),
 		SavedAccount(
 			db_id = 1,
-			acct = "user1@host1",
-			hostArg = null
+			acctArg = "user1@host1",
+			apiHostArg = null
 		)
 	)
 	
@@ -28,14 +29,12 @@ class TestDuplicateMap {
 	
 	private fun genStatus(
 		parser : TootParser,
-		accountJson : JSONObject,
+		accountJson : JsonObject,
 		statusId : String,
 		uri : String?,
 		url : String?
 	):TootStatus{
-		val itemJson = JSONObject()
-		
-		itemJson.apply {
+		val itemJson = jsonObject{
 			put("account", accountJson)
 			put("id", statusId)
 			if(uri != null) put("uri", uri)
@@ -48,7 +47,7 @@ class TestDuplicateMap {
 	private fun checkStatus(
 		map : DuplicateMap,
 		parser : TootParser,
-		accountJson : JSONObject,
+		accountJson : JsonObject,
 		statusId : String,
 		uri : String?,
 		url : String?
@@ -62,12 +61,11 @@ class TestDuplicateMap {
 	
 	private fun testDuplicateStatus() {
 		
-		val account1Json = JSONObject()
-		account1Json.apply {
+		val account1Json = jsonObject{
 			put("username", "user1")
 			put("acct", "user1")
 			put("id", 1L)
-			put("url", "http://${parser.accessHost}/@user1")
+			put("url", "http://${parser.apiHost}/@user1")
 		}
 		
 		val account1 = TootAccount(parser,account1Json)
@@ -81,8 +79,8 @@ class TestDuplicateMap {
 			parser,
 			account1Json,
 			"1",
-			"http://${parser.accessHost}/@${account1.username}/1",
-			"http://${parser.accessHost}/@${account1.username}/1"
+			"http://${parser.apiHost}/@${account1.username}/1",
+			"http://${parser.apiHost}/@${account1.username}/1"
 		)
 		// 別のステータス
 		checkStatus(
@@ -90,8 +88,8 @@ class TestDuplicateMap {
 			parser,
 			account1Json,
 			"2",
-			"http://${parser.accessHost}/@${account1.username}/2",
-			"http://${parser.accessHost}/@${account1.username}/2"
+			"http://${parser.apiHost}/@${account1.username}/2",
+			"http://${parser.apiHost}/@${account1.username}/2"
 		)
 		// 今度はuriがない
 		checkStatus(
@@ -100,7 +98,7 @@ class TestDuplicateMap {
 			account1Json,
 			"3",
 			null, // "http://${parser.accessHost}/@${account1.username}/3",
-			"http://${parser.accessHost}/@${account1.username}/3"
+			"http://${parser.apiHost}/@${account1.username}/3"
 		)
 		// 今度はuriとURLがない
 		checkStatus(
@@ -129,7 +127,7 @@ class TestDuplicateMap {
 		parser : TootParser,
 		id : Long
 	) {
-		val itemJson = JSONObject()
+		val itemJson = JsonObject()
 		
 		itemJson.apply {
 			put("type", TootNotification.TYPE_MENTION)
@@ -155,7 +153,7 @@ class TestDuplicateMap {
 		map : DuplicateMap,
 		id : Long
 	) {
-		val item = TootReport(JSONObject().apply{
+		val item = TootReport(JsonObject().apply{
 			put("id",id)
 			put("action_taken","eat")
 		})
@@ -181,12 +179,12 @@ class TestDuplicateMap {
 		id : Long
 	) {
 
-		val itemJson = JSONObject()
+		val itemJson = JsonObject()
 		itemJson.apply {
 			put("username", "user$id")
 			put("acct", "user$id")
 			put("id", id)
-			put("url", "http://${parser.accessHost}/@user$id")
+			put("url", "http://${parser.apiHost}/@user$id")
 		}
 		
 		val item = TootAccountRef.notNull(parser,TootAccount(parser,itemJson))

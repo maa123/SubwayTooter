@@ -3,10 +3,11 @@ package jp.juggler.subwaytooter.table
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import jp.juggler.subwaytooter.App1
+import jp.juggler.util.JsonObject
 import jp.juggler.util.LogCategory
 import jp.juggler.util.getString
-import jp.juggler.util.toJsonObject
-import org.json.JSONObject
+import jp.juggler.util.decodeJsonObject
+
 
 object ClientInfo :TableCompanion {
 	private val log = LogCategory("ClientInfo")
@@ -36,12 +37,12 @@ object ClientInfo :TableCompanion {
 		}
 	}
 	
-	fun load(instance : String, client_name : String) : JSONObject? {
+	fun load(instance : String, client_name : String) : JsonObject? {
 		try {
 			App1.database.query(table, null, "h=? and cn=?", arrayOf(instance, client_name), null, null, null)
 				.use { cursor ->
 					if(cursor.moveToFirst()) {
-						return cursor.getString(COL_RESULT).toJsonObject()
+						return cursor.getString(COL_RESULT).decodeJsonObject()
 					}
 				}
 		} catch(ex : Throwable) {

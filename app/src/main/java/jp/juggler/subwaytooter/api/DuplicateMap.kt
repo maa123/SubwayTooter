@@ -42,16 +42,8 @@ class DuplicateMap {
 			is TootAccount,
 			is TootAccountRef,
 			is TootNotification -> {
-				var id = o.getOrderId()
-				if(id.notDefault){
-
-					// Misskeyで時刻順ページングを行う際は重複排除は時刻ではなくオブジェクトIDを使う
-					if( id.fromTime ){
-						when(o) {
-							is TootStatus -> id = o.id
-						}
-					}
-
+				val id = o.getOrderId()
+				if(id.notDefaultOrConfirming){
 					if(set_id.contains(id)) return true
 					set_id.add(id)
 				}
@@ -67,7 +59,7 @@ class DuplicateMap {
 		if(src != null) {
 			for(o in src) {
 				if(isDuplicate(o) ){
-					log.w("filterDuplicate: filter orderId ${o.getOrderId()}")
+					log.d("filterDuplicate: filter orderId ${o.getOrderId()}")
 					continue
 				}
 				list_new.add(o)

@@ -1,12 +1,8 @@
 package jp.juggler.subwaytooter.api.entity
 
 import jp.juggler.subwaytooter.api.TootParser
-import jp.juggler.util.LogCategory
-import jp.juggler.util.groupEx
-import jp.juggler.util.toJsonObject
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.regex.Pattern
+import jp.juggler.subwaytooter.api.entity.TootAnnouncement.Reaction
+import jp.juggler.util.*
 
 object TootPayload {
 	
@@ -14,24 +10,19 @@ object TootPayload {
 	
 	private const val PAYLOAD = "payload"
 	
-	@Suppress("HasPlatformType")
-	private val reNumber = Pattern.compile("([-]?\\d+)")
+	private val reNumber = "([-]?\\d+)".asciiPattern()
 	
 	// ストリーミングAPIのペイロード部分をTootStatus,TootNotification,整数IDのどれかに解釈する
 	fun parsePayload(
 		parser : TootParser,
 		event : String,
-		parent : JSONObject,
+		parent : JsonObject,
 		parent_text : String
 	) : Any? {
 		try {
-			if(parent.isNull(PAYLOAD)) {
-				return null
-			}
+			val payload = parent[PAYLOAD] ?: return null
 			
-			val payload = parent.opt(PAYLOAD)
-			
-			if(payload is JSONObject) {
+			if(payload is JsonObject) {
 				return when(event) {
 					
 					// ここを通るケースはまだ確認できていない
@@ -46,7 +37,7 @@ object TootPayload {
 						null
 					}
 				}
-			} else if(payload is JSONArray) {
+			} else if(payload is JsonArray) {
 				log.e("unknown payload(1b). message=%s", parent_text)
 				return null
 			}
@@ -59,7 +50,7 @@ object TootPayload {
 			if(payload is String) {
 				
 				if(payload[0] == '{') {
-					val src = payload.toJsonObject()
+					val src = payload.decodeJsonObject()
 					return when(event) {
 						// 2017/8/24 18:37 mastodon.juggler.jpでここを通った
 						"update" -> parser.status(src)
@@ -69,10 +60,13 @@ object TootPayload {
 						
 						"conversation" -> parseItem(::TootConversationSummary, parser, src)
 						
-						// ここを通るケースはまだ確認できていない
+						"announcement" -> parseItem(::TootAnnouncement, parser, src)
+						
+						"announcement.reaction" -> parseItem(::Reaction, src)
+						
 						else -> {
 							log.e("unknown payload(2). message=%s", parent_text)
-							null
+							// ここを通るケースはまだ確認できていない
 						}
 					}
 				} else if(payload[0] == '[') {

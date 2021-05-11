@@ -9,60 +9,66 @@ import android.text.SpannableStringBuilder
 import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import jp.juggler.subwaytooter.App1
-import jp.juggler.util.LogCategory
-import jp.juggler.util.getIntOrNull
-import jp.juggler.util.getStringOrNull
-import jp.juggler.util.sanitizeBDI
+import jp.juggler.subwaytooter.api.entity.Acct
+import jp.juggler.subwaytooter.api.entity.TootAccount
+import jp.juggler.util.*
 import java.util.*
 
 class AcctColor {
 	
-	var acct : String
+	private var acctAscii : String
+	private var acctPretty: String
 	var color_fg : Int = 0
 	var color_bg : Int = 0
-	var nickname : String? = null
+	var nicknameSave : String? = null
 	var notification_sound : String? = null
+
+	val nickname : String
+		get() = nicknameSave.notEmpty() ?: acctPretty
+
 	
 	constructor(
-		acct : String,
-		nickname : String,
+		acctAscii : String,
+		acctPretty : String,
+		nicknameSave : String,
 		color_fg : Int,
 		color_bg : Int,
 		notification_sound : String?
 	) {
-		this.acct = acct
-		this.nickname = nickname
+		this.acctAscii = acctAscii
+		this.acctPretty = acctPretty
+		this.nicknameSave = nicknameSave
 		this.color_fg = color_fg
 		this.color_bg = color_bg
 		this.notification_sound = notification_sound
 	}
 	
-	private constructor(acct : String) {
-		this.acct = acct
+	private constructor(acctAscii : String,acctPretty:String) {
+		this.acctAscii = acctAscii
+		this.acctPretty = acctPretty
 	}
 	
 	fun save(now : Long) {
 		
-		acct = acct.toLowerCase(Locale.ENGLISH)
+		val key = acctAscii.lowercase()
 		
 		try {
 			val cv = ContentValues()
 			cv.put(COL_TIME_SAVE, now)
-			cv.put(COL_ACCT, acct)
+			cv.put(COL_ACCT, key)
 			cv.put(COL_COLOR_FG, color_fg)
 			cv.put(COL_COLOR_BG, color_bg)
-			cv.put(COL_NICKNAME, if(nickname == null) "" else nickname)
+			cv.put(COL_NICKNAME, nicknameSave ?: "" )
 			cv.put(
 				COL_NOTIFICATION_SOUND,
 				if(notification_sound == null) "" else notification_sound
 			)
 			App1.database.replace(table, null, cv)
-			mMemoryCache.remove(acct)
+			mMemoryCache.remove(key)
 		} catch(ex : Throwable) {
 			log.trace(ex)
 			log.e(ex, "save failed.")
 		}
-		
 	}
 	
 	companion object : TableCompanion {
@@ -87,7 +93,7 @@ class AcctColor {
 			}
 		}
 		
-		private val mMemoryCache = androidx.collection.LruCache<String, AcctColor>(2048)
+		private val mMemoryCache = LruCache<String, AcctColor>(2048)
 		
 		override fun onDBCreate(db : SQLiteDatabase) {
 			log.d("onDBCreate!")
@@ -126,26 +132,30 @@ class AcctColor {
 			}
 		}
 		
-		fun load(acctArg : String) : AcctColor {
-			val acct = acctArg.toLowerCase(Locale.ENGLISH)
-			val cached : AcctColor? = mMemoryCache.get(acct)
+		fun load(a:SavedAccount,who:TootAccount) =load(a.getFullAcct(who))
+		fun load(a:SavedAccount) =load(a.acct)
+		fun load(acct:Acct) =load(acct.ascii,acct.pretty)
+		
+		fun load(acctAscii: String,acctPretty : String) : AcctColor {
+			val key = acctAscii.lowercase()
+			val cached : AcctColor? = mMemoryCache.get(key)
 			if(cached != null) return cached
 			
 			try {
 				val where_arg = load_where_arg.get() ?: arrayOfNulls<String?>(1)
-				where_arg[0] = acct
+				where_arg[0] = key
 				App1.database.query(table, null, load_where, where_arg, null, null, null)
 					.use { cursor ->
 						if(cursor.moveToNext()) {
 							
-							val ac = AcctColor(acct)
+							val ac = AcctColor(key,acctPretty)
 							
 							ac.color_fg = cursor.getIntOrNull(COL_COLOR_FG) ?: 0
 							ac.color_bg = cursor.getIntOrNull(COL_COLOR_BG) ?: 0
-							ac.nickname = cursor.getStringOrNull(COL_NICKNAME)
+							ac.nicknameSave = cursor.getStringOrNull(COL_NICKNAME)
 							ac.notification_sound = cursor.getStringOrNull(COL_NOTIFICATION_SOUND)
 							
-							mMemoryCache.put(acct, ac)
+							mMemoryCache.put(key, ac)
 							return ac
 						}
 						
@@ -161,24 +171,36 @@ class AcctColor {
 				mMemoryCache.hitCount(),
 				mMemoryCache.missCount()
 			)
-			val ac = AcctColor(acct)
-			mMemoryCache.put(acct, ac)
+			val ac = AcctColor(key,acctPretty)
+			mMemoryCache.put(key, ac)
 			return ac
 		}
 		
-		fun getNickname(acct : String) : String {
-			val ac = load(acct)
-			val nickname = ac.nickname
-			return if(nickname != null && nickname.isNotEmpty()) nickname.sanitizeBDI() else acct
-		}
+//		fun getNickname(acct : String) : String {
+//			val ac = load(acct)
+//			val nickname = ac.nickname
+//			return if(nickname != null && nickname.isNotEmpty()) nickname.sanitizeBDI() else acct
+//		}
+
+		private fun getNickname(acctAscii:String, acctPretty:String) : String =
+			load(acctAscii,acctPretty).nickname
+		fun getNickname(acct: Acct) : String =
+			getNickname(acct.ascii,acct.pretty)
+		fun getNickname(sa:SavedAccount) : String =
+			getNickname(sa.acct)
+		fun getNickname(sa:SavedAccount,who:TootAccount) : String =
+			getNickname(sa.getFullAcct(who))
 		
-		fun getNicknameWithColor(
-			acct : String
-		) : CharSequence {
-			val ac = load(acct)
-			val nickname = ac.nickname
-			val name = if(nickname == null || nickname.isEmpty()) acct else nickname.sanitizeBDI()
-			val sb = SpannableStringBuilder(name)
+		
+		fun getNicknameWithColor(sa:SavedAccount,who:TootAccount)  =
+			getNicknameWithColor(sa.getFullAcct(who))
+//		fun getNicknameWithColor(sa:SavedAccount,acctArg:String)  =
+//			getNicknameWithColor(sa.getFullAcct(Acct.parse(acctArg)))
+		fun getNicknameWithColor(acct:Acct)  =
+			getNicknameWithColor(acct.ascii,acct.pretty)
+		private fun getNicknameWithColor(acctAscii : String,acctPretty : String) : CharSequence {
+			val ac = load(acctAscii,acctPretty)
+			val sb = SpannableStringBuilder(ac.nickname.sanitizeBDI())
 			val start = 0
 			val end = sb.length
 			if(ac.color_fg != 0) {
@@ -198,16 +220,17 @@ class AcctColor {
 			return sb
 		}
 		
-		fun getNotificationSound(acct : String) : String? {
-			val ac = load(acct)
-			val notification_sound = ac.notification_sound
-			return if(notification_sound != null && notification_sound.isNotEmpty()) notification_sound else null
+		fun getNotificationSound(acct : Acct) : String? {
+			return load(acct).notification_sound?.notEmpty()
 		}
+
+//		fun getNotificationSound(acctAscii : String) : String? {
+//			return load(acctAscii,"").notification_sound?.notEmpty()
+//			// acctPretty is not used in this case
+//		}
 		
-		fun hasNickname(ac : AcctColor?) : Boolean {
-			val nickname = ac?.nickname
-			return nickname != null && nickname.isNotEmpty()
-		}
+		fun hasNickname(ac : AcctColor?) : Boolean =
+			null != ac?.nicknameSave?.notEmpty()
 		
 		fun hasColorForeground(ac : AcctColor?) = (ac?.color_fg ?: 0) != 0
 		
@@ -220,11 +243,10 @@ class AcctColor {
 		fun getStringWithNickname(
 			context : Context,
 			string_id : Int,
-			acct : String
+			acct : Acct
 		) : CharSequence {
 			val ac = load(acct)
-			val nickname = ac.nickname
-			val name = if(nickname == null || nickname.isEmpty()) acct else nickname.sanitizeBDI()
+			val name = ac.nickname
 			val sb = SpannableStringBuilder(
 				context.getString(
 					string_id,

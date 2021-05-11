@@ -6,17 +6,16 @@ import android.graphics.Color
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
 import android.view.View
 import android.widget.CompoundButton
-import android.widget.Switch
 import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import com.jrummyapps.android.colorpicker.ColorPickerDialog
 import com.jrummyapps.android.colorpicker.ColorPickerDialogListener
 import jp.juggler.subwaytooter.table.HighlightWord
 import jp.juggler.util.*
 import org.jetbrains.anko.textColor
-import org.json.JSONException
 
 class ActHighlightWordEdit
 	: AppCompatActivity(),
@@ -25,6 +24,7 @@ class ActHighlightWordEdit
 	CompoundButton.OnCheckedChangeListener {
 	
 	companion object {
+		
 		internal val log = LogCategory("ActHighlightWordEdit")
 		
 		const val EXTRA_ITEM = "item"
@@ -39,7 +39,7 @@ class ActHighlightWordEdit
 				val intent = Intent(activity, ActHighlightWordEdit::class.java)
 				intent.putExtra(EXTRA_ITEM, item.encodeJson().toString())
 				activity.startActivityForResult(intent, request_code)
-			} catch(ex : JSONException) {
+			} catch(ex : JsonException) {
 				throw RuntimeException(ex)
 			}
 		}
@@ -48,9 +48,8 @@ class ActHighlightWordEdit
 	internal lateinit var item : HighlightWord
 	
 	private lateinit var tvName : TextView
-	private lateinit var swSound : Switch
-	private lateinit var swSpeech : Switch
-	
+	private lateinit var swSound : SwitchCompat
+	private lateinit var swSpeech : SwitchCompat
 	
 	private var bBusy = false
 	
@@ -59,7 +58,7 @@ class ActHighlightWordEdit
 			val data = Intent()
 			data.putExtra(EXTRA_ITEM, item.encodeJson().toString())
 			setResult(Activity.RESULT_OK, data)
-		} catch(ex : JSONException) {
+		} catch(ex : JsonException) {
 			throw RuntimeException(ex)
 		}
 	}
@@ -74,14 +73,17 @@ class ActHighlightWordEdit
 		App1.setActivityTheme(this)
 		initUI()
 		
-		item = HighlightWord(
-			(savedInstanceState?.getString(EXTRA_ITEM)
-				?: intent.getStringExtra(EXTRA_ITEM)
-				).toJsonObject()
-		)
+		val src = (savedInstanceState?.getString(EXTRA_ITEM) ?: intent.getStringExtra(EXTRA_ITEM))
+			?.decodeJsonObject()
 		
+		if(src == null) {
+			log.d("missing source data")
+			finish()
+			return
+		}
+		
+		item = HighlightWord(src)
 		showSampleText()
-		
 	}
 	
 	override fun onActivityResult(requestCode : Int, resultCode : Int, data : Intent?) {
@@ -114,6 +116,9 @@ class ActHighlightWordEdit
 		swSpeech = findViewById(R.id.swSpeech)
 		swSpeech.setOnCheckedChangeListener(this)
 		
+		setSwitchColor(App1.pref, swSound)
+		setSwitchColor(App1.pref, swSpeech)
+		
 		intArrayOf(
 			R.id.btnTextColorEdit,
 			R.id.btnTextColorReset,
@@ -137,7 +142,7 @@ class ActHighlightWordEdit
 			tvName.text = item.name
 			tvName.setBackgroundColor(item.color_bg) // may 0
 			tvName.textColor = item.color_fg.notZero()
-				?: getAttributeColor(this, android.R.attr.textColorPrimary)
+				?: attrColor(android.R.attr.textColorPrimary)
 			
 		} finally {
 			bBusy = false
@@ -179,8 +184,8 @@ class ActHighlightWordEdit
 	override fun onCheckedChanged(buttonView : CompoundButton, isChecked : Boolean) {
 		if(bBusy) return
 		
-		when(buttonView.id){
-			R.id.swSound ->{
+		when(buttonView.id) {
+			R.id.swSound -> {
 				if(! isChecked) {
 					item.sound_type = HighlightWord.SOUND_TYPE_NONE
 				} else {
@@ -188,10 +193,11 @@ class ActHighlightWordEdit
 						if(item.sound_uri?.isEmpty() != false) HighlightWord.SOUND_TYPE_DEFAULT else HighlightWord.SOUND_TYPE_CUSTOM
 				}
 			}
-			R.id.swSpeech->{
-				item.speech = when(isChecked){
-					false->0
-					else->1
+			
+			R.id.swSpeech -> {
+				item.speech = when(isChecked) {
+					false -> 0
+					else -> 1
 				}
 			}
 		}

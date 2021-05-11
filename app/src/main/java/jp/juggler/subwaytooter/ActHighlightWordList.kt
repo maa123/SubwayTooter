@@ -136,7 +136,7 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 		
 		val tvName : TextView
 		private val btnSound : View
-		val ivSpeech: ImageButton
+		private val ivSpeech : ImageButton
 		
 		init {
 			
@@ -160,15 +160,15 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 			tvName.setBackgroundColor(item.color_bg)
 			tvName.setTextColor(
 				item.color_fg.notZero()
-					?: getAttributeColor(this@ActHighlightWordList, android.R.attr.textColorPrimary)
+					?: attrColor(android.R.attr.textColorPrimary)
 			)
 			
-			btnSound.vg(item.sound_type != HighlightWord.SOUND_TYPE_NONE)?.apply{
+			btnSound.vg(item.sound_type != HighlightWord.SOUND_TYPE_NONE)?.apply {
 				setOnClickListener(this@MyViewHolder)
 				tag = item
 			}
 			
-			ivSpeech.vg(item.speech != 0 )?.apply{
+			ivSpeech.vg(item.speech != 0)?.apply {
 				setOnClickListener(this@MyViewHolder)
 				tag = item
 			}
@@ -189,12 +189,14 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 		override fun onClick(v : View) {
 			val o = v.tag
 			if(o is HighlightWord) {
-				when(v.id){
-					R.id.btnSound->{
+				when(v.id) {
+					R.id.btnSound -> {
 						sound(o)
 					}
-					R.id.ivSpeech->{
-						App1.getAppState(this@ActHighlightWordList).addSpeech(o.name,allowRepeat = true)
+					
+					R.id.ivSpeech -> {
+						App1.getAppState(this@ActHighlightWordList)
+							.addSpeech(o.name, dedupMode = DedupMode.None)
 					}
 				}
 			}
@@ -202,30 +204,26 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 	}
 	
 	// ドラッグ操作中のデータ
-	private inner class MyDragItem internal constructor(context : Context, layoutId : Int) :
+	private inner class MyDragItem(context : Context, layoutId : Int) :
 		DragItem(context, layoutId) {
 		
 		override fun onBindDragView(clickedView : View, dragView : View) {
-
+			
 			dragView.findViewById<TextView>(R.id.tvName).text =
 				clickedView.findViewById<TextView>(R.id.tvName).text
-
+			
 			dragView.findViewById<View>(R.id.btnSound).visibility =
 				clickedView.findViewById<View>(R.id.btnSound).visibility
-
-			dragView.findViewById<View>(R.id.ivSpeech).visibility=
+			
+			dragView.findViewById<View>(R.id.ivSpeech).visibility =
 				clickedView.findViewById<View>(R.id.ivSpeech).visibility
-
-			dragView.findViewById<View>(R.id.item_layout).setBackgroundColor(
-				getAttributeColor(
-					this@ActHighlightWordList,
-					R.attr.list_item_bg_pressed_dragged
-				)
-			)
+			
+			dragView.findViewById<View>(R.id.item_layout)
+				.setBackgroundColor(attrColor(R.attr.list_item_bg_pressed_dragged))
 		}
 	}
 	
-	private inner class MyListAdapter internal constructor() :
+	private inner class MyListAdapter :
 		DragItemAdapter<HighlightWord, MyViewHolder>() {
 		
 		init {
@@ -250,23 +248,27 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 	}
 	
 	private fun create() {
-		DlgTextInput.show(this, getString(R.string.new_item), "", object : DlgTextInput.Callback {
-			override fun onEmptyError() {
-				showToast(this@ActHighlightWordList, true, R.string.word_empty)
-			}
-			
-			override fun onOK(dialog : Dialog, text : String) {
-				var item = HighlightWord.load(text)
-				if(item == null) {
-					item = HighlightWord(text)
-					item.save(this@ActHighlightWordList)
-					loadData()
+		DlgTextInput.show(
+			this,
+			getString(R.string.new_item),
+			"",
+			callback = object : DlgTextInput.Callback {
+				override fun onEmptyError() {
+					showToast(true, R.string.word_empty)
 				}
-				edit(item)
 				
-				dialog.dismissSafe()
-			}
-		})
+				override fun onOK(dialog : Dialog, text : String) {
+					var item = HighlightWord.load(text)
+					if(item == null) {
+						item = HighlightWord(text)
+						item.save(this@ActHighlightWordList)
+						loadData()
+					}
+					edit(item)
+					
+					dialog.dismissSafe()
+				}
+			})
 	}
 	
 	private fun edit(item : HighlightWord) {
@@ -280,7 +282,7 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 				data != null ->
 				try {
 					val sv = data.getStringExtra(ActHighlightWordEdit.EXTRA_ITEM) ?: return
-					val item = HighlightWord(sv.toJsonObject())
+					val item = HighlightWord(sv.decodeJsonObject())
 					item.save(this@ActHighlightWordList)
 					loadData()
 				} catch(ex : Throwable) {

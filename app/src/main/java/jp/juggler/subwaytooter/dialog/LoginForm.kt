@@ -10,13 +10,16 @@ import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.widget.*
 import jp.juggler.subwaytooter.R
+import jp.juggler.subwaytooter.api.entity.Host
 import jp.juggler.util.LogCategory
 import jp.juggler.util.showToast
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.IDN
 import java.util.*
 
 object LoginForm {
+	
 	private val log = LogCategory("LoginForm")
 	
 	private class StringArray : ArrayList<String>()
@@ -39,7 +42,7 @@ object LoginForm {
 		instanceArg : String?,
 		onClickOk : (
 			dialog : Dialog,
-			instance : String,
+			instance : Host,
 			action : Action
 		) -> Unit
 	) {
@@ -105,37 +108,40 @@ object LoginForm {
 			when {
 				
 				instance.isEmpty() ->
-					showToast(activity, true, R.string.instance_not_specified)
+					activity.showToast(true, R.string.instance_not_specified)
 				
 				instance.contains("/") || instance.contains("@") ->
-					showToast(activity, true, R.string.instance_not_need_slash)
+					activity.showToast(true, R.string.instance_not_need_slash)
 				
 				else -> {
 					val actionPos = spAction.selectedItemPosition
 					when(val action = Action.values().find { it.pos == actionPos }) {
 						null -> {
 						} // will no happened
-						else -> onClickOk(dialog, instance, action)
+						else -> onClickOk(dialog, Host.parse(instance), action)
 					}
 				}
 			}
 		}
 		view.findViewById<View>(R.id.btnCancel).setOnClickListener { dialog.cancel() }
 		
-		val instance_list = ArrayList<String>()
-		try {
-			activity.resources.openRawResource(R.raw.server_list).use { inStream ->
-				val br = BufferedReader(InputStreamReader(inStream, "UTF-8"))
-				while(true) {
-					val s : String =
-						br.readLine()?.trim { it <= ' ' }?.toLowerCase(Locale.JAPAN) ?: break
-					if(s.isNotEmpty()) instance_list.add(s)
+		val instance_list = HashSet<String>().apply {
+			try {
+				activity.resources.openRawResource(R.raw.server_list).use { inStream ->
+					val br = BufferedReader(InputStreamReader(inStream, "UTF-8"))
+					while(true) {
+						val s : String =
+							br.readLine()?.trim { it <= ' ' }?.lowercase() ?: break
+						if(s.isEmpty()) continue
+						add(s)
+						add(IDN.toASCII(s, IDN.ALLOW_UNASSIGNED))
+						add(IDN.toUnicode(s, IDN.ALLOW_UNASSIGNED))
+					}
 				}
+			} catch(ex : Throwable) {
+				log.trace(ex)
 			}
-			instance_list.sort()
-		} catch(ex : Throwable) {
-			log.trace(ex)
-		}
+		}.toList().sorted()
 		
 		val adapter = object : ArrayAdapter<String>(
 			activity, R.layout.lv_spinner_dropdown, ArrayList()
@@ -146,23 +152,22 @@ object LoginForm {
 					return value as String
 				}
 				
-				override fun performFiltering(constraint : CharSequence?) : FilterResults {
-					val result = FilterResults()
-					if(constraint?.isNotEmpty() == true) {
-						val key = constraint.toString().toLowerCase(Locale.JAPAN)
-						// suggestions リストは毎回生成する必要がある。publishResultsと同時にアクセスされる場合がある
-						val suggestions = StringArray()
-						for(s in instance_list) {
-							if(s.contains(key)) {
-								suggestions.add(s)
-								if(suggestions.size >= 20) break
+				override fun performFiltering(constraint : CharSequence?) : FilterResults =
+					FilterResults().also { result ->
+						if(constraint?.isNotEmpty() == true) {
+							val key = constraint.toString().lowercase()
+							// suggestions リストは毎回生成する必要がある。publishResultsと同時にアクセスされる場合がある
+							val suggestions = StringArray()
+							for(s in instance_list) {
+								if(s.contains(key)) {
+									suggestions.add(s)
+									if(suggestions.size >= 20) break
+								}
 							}
+							result.values = suggestions
+							result.count = suggestions.size
 						}
-						result.values = suggestions
-						result.count = suggestions.size
 					}
-					return result
-				}
 				
 				override fun publishResults(
 					constraint : CharSequence?,

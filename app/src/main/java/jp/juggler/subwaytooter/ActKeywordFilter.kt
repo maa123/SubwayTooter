@@ -15,8 +15,6 @@ import jp.juggler.subwaytooter.api.entity.TootFilter
 import jp.juggler.subwaytooter.api.entity.TootStatus
 import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.util.*
-import org.json.JSONArray
-import org.json.JSONObject
 
 class ActKeywordFilter
 	: AppCompatActivity(), View.OnClickListener {
@@ -65,6 +63,8 @@ class ActKeywordFilter
 	private lateinit var cbContextNotification : CheckBox
 	private lateinit var cbContextPublic : CheckBox
 	private lateinit var cbContextThread : CheckBox
+	private lateinit var cbContextProfile : CheckBox
+	
 	private lateinit var cbFilterIrreversible : CheckBox
 	private lateinit var cbFilterWordMatch : CheckBox
 	private lateinit var tvExpire : TextView
@@ -135,6 +135,7 @@ class ActKeywordFilter
 		cbContextNotification = findViewById(R.id.cbContextNotification)
 		cbContextPublic = findViewById(R.id.cbContextPublic)
 		cbContextThread = findViewById(R.id.cbContextThread)
+		cbContextProfile = findViewById(R.id.cbContextProfile)
 		cbFilterIrreversible = findViewById(R.id.cbFilterIrreversible)
 		cbFilterWordMatch = findViewById(R.id.cbFilterWordMatch)
 		tvExpire = findViewById(R.id.tvExpire)
@@ -161,7 +162,7 @@ class ActKeywordFilter
 		loading = true
 		TootTaskRunner(this).run(account, object : TootTask {
 			var filter : TootFilter? = null
-			override fun background(client : TootApiClient) : TootApiResult? {
+			override suspend fun background(client : TootApiClient) : TootApiResult? {
 				val result = client.request("${Column.PATH_FILTERS}/${filter_id}")
 				val jsonObject = result?.jsonObject
 				if(jsonObject != null) {
@@ -170,14 +171,14 @@ class ActKeywordFilter
 				return result
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				loading = false
 				val filter = this.filter
 				if(filter != null) {
 					onLoadComplete(filter)
 				} else {
 					if(result != null) {
-						showToast(this@ActKeywordFilter, true, result.error ?: "?")
+						showToast(true, result.error ?: "?")
 					}
 					finish()
 				}
@@ -195,6 +196,7 @@ class ActKeywordFilter
 		setContextChecked(filter, cbContextNotification, TootFilter.CONTEXT_NOTIFICATIONS)
 		setContextChecked(filter, cbContextPublic, TootFilter.CONTEXT_PUBLIC)
 		setContextChecked(filter, cbContextThread, TootFilter.CONTEXT_THREAD)
+		setContextChecked(filter, cbContextProfile, TootFilter.CONTEXT_PROFILE)
 		
 		cbFilterIrreversible.isChecked = filter.irreversible
 		cbFilterWordMatch.isChecked = filter.whole_word
@@ -216,22 +218,24 @@ class ActKeywordFilter
 		cb.isChecked = ((filter.context and bit) != 0)
 	}
 	
-	private fun JSONArray.putContextChecked(cb : CheckBox, key : String) {
-		if(cb.isChecked) this.put(key)
+	private fun JsonArray.putContextChecked(cb : CheckBox, key : String) {
+		if(cb.isChecked) add(key)
 	}
 	
 	private fun save() {
 		if(loading) return
 		
-		val params = JSONObject().apply {
+		val params = jsonObject {
 			
 			put("phrase", etPhrase.text.toString())
 			
-			put("context", JSONArray().apply {
+			put("context", JsonArray().apply {
 				putContextChecked(cbContextHome, "home")
 				putContextChecked(cbContextNotification, "notifications")
 				putContextChecked(cbContextPublic, "public")
 				putContextChecked(cbContextThread, "thread")
+				putContextChecked(cbContextProfile, "account")
+				
 			})
 			
 			put("irreversible", cbFilterIrreversible.isChecked)
@@ -251,11 +255,12 @@ class ActKeywordFilter
 				}
 				
 				// unlimited
-				0 -> if(filter_expire <= 0L) {
+				0 -> when {
 					// already unlimited. don't change.
-				} else {
+					filter_expire <= 0L -> {
+					}
 					// FIXME: currently there is no way to remove expires from existing filter.
-					put("expires_in", Int.MAX_VALUE)
+					else -> put("expires_in", Int.MAX_VALUE)
 				}
 				
 				// set seconds
@@ -266,7 +271,7 @@ class ActKeywordFilter
 		
 		TootTaskRunner(this).run(account, object : TootTask {
 			
-			override fun background(client : TootApiClient) = if(filter_id == null) {
+			override suspend fun background(client : TootApiClient) = if(filter_id == null) {
 				client.request(
 					Column.PATH_FILTERS,
 					params.toPostRequestBuilder()
@@ -278,17 +283,15 @@ class ActKeywordFilter
 				)
 			}
 			
-			override fun handleResult(result : TootApiResult?) {
+			override suspend fun handleResult(result : TootApiResult?) {
 				result ?: return
 				val error = result.error
 				if(error != null) {
-					showToast(this@ActKeywordFilter, true, result.error)
+					showToast(true, result.error)
 				} else {
-					val app_state = App1.prepare(applicationContext)
-					for(column in app_state.column_list) {
-						if(column.access_info.acct == account.acct
-							&& column.type == ColumnType.KEYWORD_FILTER
-						) {
+					val app_state = App1.prepare(applicationContext, "ActKeywordFilter.save()")
+					for(column in app_state.columnList ) {
+						if(column.type == ColumnType.KEYWORD_FILTER && column.access_info == account) {
 							column.filter_reload_required = true
 						}
 					}

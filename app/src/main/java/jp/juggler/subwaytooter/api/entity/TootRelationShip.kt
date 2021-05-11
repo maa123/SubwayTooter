@@ -1,12 +1,10 @@
 package jp.juggler.subwaytooter.api.entity
 
 import jp.juggler.subwaytooter.api.TootParser
-import org.json.JSONObject
-
 import jp.juggler.subwaytooter.table.UserRelation
-import jp.juggler.util.parseString
+import jp.juggler.util.JsonObject
 
-class TootRelationShip(parser:TootParser,src : JSONObject) {
+class TootRelationShip(parser:TootParser,src : JsonObject) {
 	
 	// Target account id
 	// MisskeyのユーザリレーションはuserIdを含まないので後から何か設定する必要がある
@@ -41,6 +39,11 @@ class TootRelationShip(parser:TootParser,src : JSONObject) {
 	
 	// misskey用
 	val requested_by : Boolean
+	
+	val notifying : Boolean
+	
+	// (Mastodon 3.2)
+	var note : String? = null
 
 	init {
 		
@@ -54,21 +57,22 @@ class TootRelationShip(parser:TootParser,src : JSONObject) {
 			blocked_by = src.optBoolean("isBlocked")
 			requested = src.optBoolean("hasPendingFollowRequestFromYou")
 			requested_by = src.optBoolean("hasPendingFollowRequestToYou")
-			
+
+			notifying = false
 			endorsed = false
 			showing_reblogs = UserRelation.REBLOG_UNKNOWN
 			
 		}else{
-			this.id = EntityId.mayDefault( src.parseString("id") )
+			this.id = EntityId.mayDefault( src.string("id") )
 			
-			var ov = src.opt("following")
-			if(ov is JSONObject) {
+			var ov = src["following"]
+			if(ov is JsonObject) {
 				// https://github.com/tootsuite/mastodon/issues/5856
 				// 一部の開発版ではこうなっていた
 				
 				this.following = true
 				
-				ov = ov.opt("reblogs")
+				ov = ov["reblogs"]
 				if(ov is Boolean) {
 					this.showing_reblogs = if(ov) UserRelation.REBLOG_SHOW else UserRelation.REBLOG_HIDE
 				} else {
@@ -79,7 +83,7 @@ class TootRelationShip(parser:TootParser,src : JSONObject) {
 				this.following = if(ov is Boolean) ov else false
 				
 				// 2.1 の挙動
-				ov = src.opt("showing_reblogs")
+				ov = src["showing_reblogs"]
 				if(this.following && ov is Boolean) {
 					this.showing_reblogs = if(ov) UserRelation.REBLOG_SHOW else UserRelation.REBLOG_HIDE
 				} else {
@@ -93,6 +97,8 @@ class TootRelationShip(parser:TootParser,src : JSONObject) {
 			this.muting = src.optBoolean("muting")
 			this.requested = src.optBoolean("requested")
 			this.endorsed = src.optBoolean("endorsed")
+			this.note = src.optString( "note")
+			this.notifying =  src.optBoolean("notifying")
 			
 			// https://github.com/tootsuite/mastodon/commit/9745de883b198375ba23f7fde879f6d75ce2df0f
 			// Mastodon 2.8.0から

@@ -5,8 +5,11 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import android.widget.Button
 import android.widget.EditText
 import androidx.appcompat.app.AppCompatActivity
+import jp.juggler.subwaytooter.util.CustomShare
+import jp.juggler.subwaytooter.util.CustomShareTarget
 import jp.juggler.subwaytooter.api.entity.TootAccount
 import jp.juggler.subwaytooter.api.entity.TootStatus
 import jp.juggler.subwaytooter.table.MutedWord
@@ -25,7 +28,8 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 		
 		internal const val RESULT_SEARCH_MSP = RESULT_FIRST_USER + 1
 		internal const val RESULT_SEARCH_TS = RESULT_FIRST_USER + 2
-		
+		internal const val RESULT_SEARCH_NOTESTOCK = RESULT_FIRST_USER + 3
+
 		internal const val EXTRA_TEXT = "text"
 		internal const val EXTRA_CONTENT_START = "content_start"
 		internal const val EXTRA_CONTENT_END = "content_end"
@@ -58,6 +62,7 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 	}
 	
 	private lateinit var etText : EditText
+	private lateinit var btnTranslate : Button
 	
 	private val selection : String
 		get() {
@@ -97,6 +102,7 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 			
 			etText.setSelection(content_start, content_end)
 		}
+		
 	}
 	
 	internal fun initUI() {
@@ -107,13 +113,13 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 		Styler.fixHorizontalMargin(findViewById(R.id.svContent))
 		
 		etText = findViewById(R.id.etText)
+		btnTranslate = findViewById(R.id.btnTranslate)
 		
+		btnTranslate.setOnClickListener(this)
 		findViewById<View>(R.id.btnCopy).setOnClickListener(this)
 		findViewById<View>(R.id.btnSearch).setOnClickListener(this)
 		findViewById<View>(R.id.btnSend).setOnClickListener(this)
 		findViewById<View>(R.id.btnMuteWord).setOnClickListener(this)
-		
-		findViewById<View>(R.id.btnSearchMSP).setOnClickListener(this)
 		findViewById<View>(R.id.btnSearchTS).setOnClickListener(this)
 		
 		val btnKeywordFilter : View = findViewById(R.id.btnKeywordFilter)
@@ -133,10 +139,16 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 			
 			R.id.btnMuteWord -> muteWord()
 			
-			R.id.btnSearchMSP -> searchToot(RESULT_SEARCH_MSP)
+			R.id.btnTranslate -> CustomShare.invoke(
+				this,
+				selection,
+				CustomShareTarget.Translate
+			)
 			
 			R.id.btnSearchTS -> searchToot(RESULT_SEARCH_TS)
-			
+
+			R.id.btnSearchNotestock -> searchToot(RESULT_SEARCH_NOTESTOCK)
+
 			R.id.btnKeywordFilter -> keywordFilter()
 		}
 	}
@@ -152,7 +164,7 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 			
 		} catch(ex : Throwable) {
 			log.trace(ex)
-			showToast(this, ex, "send failed.")
+			showToast(ex, "send failed.")
 		}
 		
 	}
@@ -160,7 +172,7 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 	private fun search() {
 		val sv = selection
 		if(sv.isEmpty()) {
-			showToast(this, false, "please select search keyword")
+			showToast(false, "please select search keyword")
 			return
 		}
 		try {
@@ -171,15 +183,15 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 			}
 		} catch(ex : Throwable) {
 			log.trace(ex)
-			showToast(this, ex, "search failed.")
+			showToast(ex, "search failed.")
 		}
 		
 	}
 	
-	private fun searchToot(resultCode : Int) {
+	private fun searchToot(@Suppress("SameParameterValue") resultCode : Int) {
 		val sv = selection
 		if(sv.isEmpty()) {
-			showToast(this, false, "please select search keyword")
+			showToast(false, "please select search keyword")
 			return
 		}
 		try {
@@ -197,10 +209,10 @@ class ActText : AppCompatActivity(), View.OnClickListener {
 		try {
 			MutedWord.save(selection)
 			App1.getAppState(this).onMuteUpdated()
-			showToast(this, false, R.string.word_was_muted)
+			showToast(false, R.string.word_was_muted)
 		} catch(ex : Throwable) {
 			log.trace(ex)
-			showToast(this, ex, "muteWord failed.")
+			showToast(ex, "muteWord failed.")
 		}
 		
 	}

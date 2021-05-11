@@ -8,7 +8,7 @@ import android.view.ViewGroup
 import android.widget.TextView
 import jp.juggler.subwaytooter.table.MutedApp
 import jp.juggler.util.LogCategory
-import jp.juggler.util.getAttributeColor
+import jp.juggler.util.attrColor
 import java.util.*
 import com.woxthebox.draglistview.DragItem
 import com.woxthebox.draglistview.DragItemAdapter
@@ -19,6 +19,7 @@ import com.woxthebox.draglistview.swipe.ListSwipeItem
 class ActMutedApp : AppCompatActivity() {
 	
 	companion object {
+		
 		private val log = LogCategory("ActMutedApp")
 	}
 	
@@ -161,21 +162,19 @@ class ActMutedApp : AppCompatActivity() {
 	}
 	
 	// ドラッグ操作中のデータ
-	private inner class MyDragItem internal constructor(context : Context, layoutId : Int) :
+	private inner class MyDragItem(context : Context, layoutId : Int) :
 		DragItem(context, layoutId) {
 		
 		override fun onBindDragView(clickedView : View, dragView : View) {
 			dragView.findViewById<TextView>(R.id.tvName).text =
 				clickedView.findViewById<TextView>(R.id.tvName).text
 			
-			dragView.findViewById<View>(R.id.item_layout).setBackgroundColor(
-				getAttributeColor(this@ActMutedApp, R.attr.list_item_bg_pressed_dragged)
-			)
+			dragView.findViewById<View>(R.id.item_layout)
+				.setBackgroundColor(attrColor(R.attr.list_item_bg_pressed_dragged))
 		}
 	}
 	
-	private inner class MyListAdapter internal constructor() :
-		DragItemAdapter<MyItem, MyViewHolder>() {
+	private inner class MyListAdapter : DragItemAdapter<MyItem, MyViewHolder>() {
 		
 		init {
 			setHasStableIds(true)
