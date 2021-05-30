@@ -17,7 +17,6 @@ import jp.juggler.subwaytooter.api.TootApiResult
 import jp.juggler.subwaytooter.api.TootParser
 import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.table.*
-import jp.juggler.subwaytooter.util.PushSubscriptionHelper
 import jp.juggler.util.*
 import kotlinx.coroutines.*
 import okhttp3.Call
@@ -881,6 +880,8 @@ class TaskRunner(
             TootNotification.TYPE_FAVOURITE ->
                 context.getString(R.string.display_name_favourited_by, name)
 
+            TootNotification.TYPE_EMOJI_REACTION_PLEROMA,
+            TootNotification.TYPE_EMOJI_REACTION,
             TootNotification.TYPE_REACTION ->
                 context.getString(R.string.display_name_reaction_by, name)
 

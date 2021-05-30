@@ -1,10 +1,10 @@
-package jp.juggler.subwaytooter.util
+package jp.juggler.subwaytooter.notification
 
 import android.content.Context
-import jp.juggler.subwaytooter.notification.PollingWorker
 import jp.juggler.subwaytooter.R
 import jp.juggler.subwaytooter.api.TootApiClient
 import jp.juggler.subwaytooter.api.TootApiResult
+import jp.juggler.subwaytooter.api.entity.InstanceCapability
 import jp.juggler.subwaytooter.api.entity.TootInstance
 import jp.juggler.subwaytooter.api.entity.TootPushSubscription
 import jp.juggler.subwaytooter.api.entity.parseItem
@@ -42,7 +42,7 @@ class PushSubscriptionHelper(
         account.notification_favourite.booleanToInt(2) +
         account.notification_follow.booleanToInt(4) +
         account.notification_mention.booleanToInt(8) +
-        (account.isMisskey && account.notification_reaction).booleanToInt(16) +
+        account.notification_reaction.booleanToInt(16) +
         account.notification_vote.booleanToInt(32) +
         account.notification_follow_request.booleanToInt(64) +
         account.notification_post.booleanToInt(128)
@@ -329,6 +329,7 @@ class PushSubscriptionHelper(
             put("poll", account.notification_vote)
             put("follow_request", account.notification_follow_request)
             put("status", account.notification_post)
+            put("emoji_reaction", account.notification_reaction) // fedibird拡張
         }
 
         suspend fun canSkipSubscription(): TootApiResult? {
@@ -385,6 +386,9 @@ class PushSubscriptionHelper(
                     "poll" -> ti.versionGE(TootInstance.VERSION_2_8_0_rc1)
                     "follow_request" -> ti.versionGE(TootInstance.VERSION_3_1_0_rc1)
                     "status" -> ti.versionGE(TootInstance.VERSION_3_3_0_rc1)
+                    "emoji_reaction" -> ti.versionGE(TootInstance.VERSION_3_4_0_rc1) &&
+                        InstanceCapability.emojiReaction(account,ti)
+
                     else -> {
                         log.w("${account.acct}: unknown alert '$it'. server version='${ti.version}'")
                         false // 未知のアラートの差異は比較しない
@@ -480,7 +484,7 @@ class PushSubscriptionHelper(
                 })
                 put("data", JsonObject().apply {
                     put("alerts", newAlerts)
-                    account.push_policy?.let{ put("policy",it )}
+                    account.push_policy?.let { put("policy", it) }
                 })
             }
 

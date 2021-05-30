@@ -19,23 +19,27 @@ import android.text.TextWatcher
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import jp.juggler.subwaytooter.Styler.defaultColorIcon
+import jp.juggler.subwaytooter.action.accountRemove
 import jp.juggler.subwaytooter.api.*
 import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.dialog.ActionsDialog
 import jp.juggler.subwaytooter.notification.NotificationHelper
 import jp.juggler.subwaytooter.notification.PollingWorker
+import jp.juggler.subwaytooter.notification.PushSubscriptionHelper
 import jp.juggler.subwaytooter.table.AcctColor
 import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.subwaytooter.util.*
 import jp.juggler.subwaytooter.view.MyNetworkImageView
 import jp.juggler.util.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.*
+import kotlinx.serialization.json.*
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -47,7 +51,7 @@ import ru.gildor.coroutines.okhttp.await
 import java.io.*
 import kotlin.math.max
 
-class ActAccountSetting : AsyncActivity(), View.OnClickListener,
+class ActAccountSetting : AppCompatActivity(), View.OnClickListener,
     CompoundButton.OnCheckedChangeListener, AdapterView.OnItemSelectedListener {
 
     companion object {
@@ -55,13 +59,6 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         internal val log = LogCategory("ActAccountSetting")
 
         internal const val KEY_ACCOUNT_DB_ID = "account_db_id"
-
-        internal const val REQUEST_CODE_ACCT_CUSTOMIZE = 1
-        internal const val REQUEST_CODE_NOTIFICATION_SOUND = 2
-        private const val REQUEST_CODE_AVATAR_ATTACHMENT = 3
-        private const val REQUEST_CODE_HEADER_ATTACHMENT = 4
-        private const val REQUEST_CODE_AVATAR_CAMERA = 5
-        private const val REQUEST_CODE_HEADER_CAMERA = 6
 
         internal const val RESULT_INPUT_ACCESS_TOKEN = Activity.RESULT_FIRST_USER + 10
         internal const val EXTRA_DB_ID = "db_id"
@@ -76,13 +73,23 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         internal const val MIME_TYPE_JPEG = "image/jpeg"
         internal const val MIME_TYPE_PNG = "image/png"
 
-        fun open(activity: Activity, ai: SavedAccount, requestCode: Int) {
-            val intent = Intent(activity, ActAccountSetting::class.java)
-            intent.putExtra(KEY_ACCOUNT_DB_ID, ai.db_id)
-            activity.startActivityForResult(intent, requestCode)
-        }
+        private const val ACTIVITY_STATE = "MyActivityState"
 
+        fun createIntent(activity: Activity, ai: SavedAccount) =
+            Intent(activity, ActAccountSetting::class.java).apply {
+                putExtra(KEY_ACCOUNT_DB_ID, ai.db_id)
+            }
     }
+
+    @kotlinx.serialization.Serializable
+    data class State(
+        var propName: String = "",
+
+        @kotlinx.serialization.Serializable(with = UriOrNullSerializer::class)
+        var uriCameraImage: Uri? = null,
+    )
+
+    var state = State()
 
     internal lateinit var account: SavedAccount
     internal lateinit var pref: SharedPreferences
@@ -124,6 +131,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
     private lateinit var cbConfirmUnboost: CheckBox
     private lateinit var cbConfirmUnfavourite: CheckBox
     private lateinit var cbConfirmToot: CheckBox
+    private lateinit var cbConfirmReaction: CheckBox
 
     private lateinit var tvUserCustom: TextView
     private lateinit var btnUserCustom: View
@@ -177,15 +185,82 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
 
     private lateinit var pushPolicyItems: List<PushPolicyItem>
 
-    ///////////////////////////////////////////////////
-
     internal var visibility = TootVisibility.Public
 
-    private var uriCameraImage: Uri? = null
+
+    ///////////////////////////////////////////////////////////////////
+
+    private val arShowAcctColor = activityResultHandler { ar ->
+        if (ar?.resultCode == Activity.RESULT_OK) {
+            showAcctColor()
+        }
+    }
+
+    private val arNotificationSound = activityResultHandler { ar ->
+        if (ar?.resultCode == Activity.RESULT_OK) {
+            // RINGTONE_PICKERからの選択されたデータを取得する
+            val uri = ar.data?.extras?.get(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            if (uri is Uri) {
+                notification_sound_uri = uri.toString()
+                saveUIToData()
+                //			Ringtone ringtone = RingtoneManager.getRingtone(getApplicationContext(), uri);
+                //			TextView ringView = (TextView) findViewById(R.id.ringtone);
+                //			ringView.setText(ringtone.getTitle(getApplicationContext()));
+                //			ringtone.setStreamType(AudioManager.STREAM_ALARM);
+                //			ringtone.play();
+                //			SystemClock.sleep(1000);
+                //			ringtone.stop();
+            }
+        }
+    }
+
+
+    private val arAddAttachment = activityResultHandler { ar ->
+        if (ar?.resultCode == Activity.RESULT_OK)
+            ar.data
+                ?.handleGetContentResult(contentResolver)
+                ?.firstOrNull()
+                ?.let {
+                    addAttachment(
+                        state.propName,
+                        it.uri,
+                        it.mimeType?.notEmpty() ?: contentResolver.getType(it.uri)
+                    )
+                }
+    }
+
+    private val arCameraImage = activityResultHandler { ar ->
+        if (ar?.resultCode == Activity.RESULT_OK) {
+            // 画像のURL
+            val uri = ar.data?.data ?: state.uriCameraImage
+            if (uri != null) {
+                val type = contentResolver.getType(uri)
+                addAttachment(state.propName, uri, type)
+            }
+        } else {
+            // 失敗したら DBからデータを削除
+            state.uriCameraImage?.let {
+                contentResolver.delete(it, null, null)
+            }
+            state.uriCameraImage = null
+        }
+    }
+
+    ///////////////////////////////////////////////////
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        arShowAcctColor.register(this, log)
+        arNotificationSound.register(this, log)
+        arAddAttachment.register(this, log)
+        arCameraImage.register(this, log)
+
+        if (savedInstanceState != null) {
+            savedInstanceState.getString(ACTIVITY_STATE)
+                ?.let { state = Json.decodeFromString(it) }
+        }
 
         App1.setActivityTheme(this)
         this.pref = App1.pref
@@ -206,71 +281,19 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         btnOpenBrowser.text = getString(R.string.open_instance_website, account.apiHost.pretty)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+
+        val encodedState = Json.encodeToString(state)
+        log.d("encodedState=$encodedState")
+        val decodedState: State = Json.decodeFromString(encodedState)
+        log.d("encodedState.uriCameraImage=${decodedState.uriCameraImage}")
+        outState.putString(ACTIVITY_STATE, encodedState)
+    }
+
     override fun onStop() {
         PollingWorker.queueUpdateNotification(this)
         super.onStop()
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        when (requestCode) {
-            REQUEST_CODE_ACCT_CUSTOMIZE -> {
-                if (resultCode == Activity.RESULT_OK) {
-                    showAcctColor()
-                }
-            }
-
-            REQUEST_CODE_NOTIFICATION_SOUND -> {
-                if (resultCode == Activity.RESULT_OK) {
-                    // RINGTONE_PICKERからの選択されたデータを取得する
-                    val uri = data?.extras?.get(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
-                    if (uri is Uri) {
-                        notification_sound_uri = uri.toString()
-                        saveUIToData()
-                        //			Ringtone ringtone = RingtoneManager.getRingtone(getApplicationContext(), uri);
-                        //			TextView ringView = (TextView) findViewById(R.id.ringtone);
-                        //			ringView.setText(ringtone.getTitle(getApplicationContext()));
-                        //			ringtone.setStreamType(AudioManager.STREAM_ALARM);
-                        //			ringtone.play();
-                        //			SystemClock.sleep(1000);
-                        //			ringtone.stop();
-                    }
-                }
-            }
-
-            REQUEST_CODE_AVATAR_ATTACHMENT, REQUEST_CODE_HEADER_ATTACHMENT -> {
-
-                if (resultCode == Activity.RESULT_OK && data != null) {
-                    data.handleGetContentResult(contentResolver).firstOrNull()?.let {
-                        addAttachment(
-                            requestCode,
-                            it.uri,
-                            it.mimeType?.notEmpty() ?: contentResolver.getType(it.uri)
-                        )
-                    }
-                }
-            }
-
-            REQUEST_CODE_AVATAR_CAMERA, REQUEST_CODE_HEADER_CAMERA -> {
-
-                if (resultCode != Activity.RESULT_OK) {
-                    // 失敗したら DBからデータを削除
-                    val uriCameraImage = this@ActAccountSetting.uriCameraImage
-                    if (uriCameraImage != null) {
-                        contentResolver.delete(uriCameraImage, null, null)
-                        this@ActAccountSetting.uriCameraImage = null
-                    }
-                } else {
-                    // 画像のURL
-                    val uri = data?.data ?: uriCameraImage
-                    if (uri != null) {
-                        val type = contentResolver.getType(uri)
-                        addAttachment(requestCode, uri, type)
-                    }
-                }
-            }
-
-            else -> super.onActivityResult(requestCode, resultCode, data)
-        }
     }
 
     var density: Float = 1f
@@ -322,6 +345,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         cbConfirmUnboost = findViewById(R.id.cbConfirmUnboost)
         cbConfirmUnfavourite = findViewById(R.id.cbConfirmUnfavourite)
         cbConfirmToot = findViewById(R.id.cbConfirmToot)
+        cbConfirmReaction = findViewById(R.id.cbConfirmReaction)
 
         tvUserCustom = findViewById(R.id.tvUserCustom)
         btnUserCustom = findViewById(R.id.btnUserCustom)
@@ -403,66 +427,10 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         ).map { findViewById(it) }
 
         btnFields = findViewById(R.id.btnFields)
-
-
-
-
-        btnOpenBrowser.setOnClickListener(this)
-        btnPushSubscription.setOnClickListener(this)
-        btnPushSubscriptionNotForce.setOnClickListener(this)
-        btnResetNotificationTracking.setOnClickListener(this)
-        btnAccessToken.setOnClickListener(this)
-        btnInputAccessToken.setOnClickListener(this)
-        btnAccountRemove.setOnClickListener(this)
-        btnLoadPreference.setOnClickListener(this)
-        btnVisibility.setOnClickListener(this)
-        btnUserCustom.setOnClickListener(this)
-        btnProfileAvatar.setOnClickListener(this)
-        btnProfileHeader.setOnClickListener(this)
-        btnDisplayName.setOnClickListener(this)
-        btnNote.setOnClickListener(this)
-        btnFields.setOnClickListener(this)
-
-        swNSFWOpen.setOnCheckedChangeListener(this)
-        swDontShowTimeout.setOnCheckedChangeListener(this)
-        swExpandCW.setOnCheckedChangeListener(this)
-        swMarkSensitive.setOnCheckedChangeListener(this)
-        cbNotificationMention.setOnCheckedChangeListener(this)
-        cbNotificationBoost.setOnCheckedChangeListener(this)
-        cbNotificationFavourite.setOnCheckedChangeListener(this)
-        cbNotificationFollow.setOnCheckedChangeListener(this)
-        cbNotificationFollowRequest.setOnCheckedChangeListener(this)
-        cbNotificationReaction.setOnCheckedChangeListener(this)
-        cbNotificationVote.setOnCheckedChangeListener(this)
-        cbNotificationPost.setOnCheckedChangeListener(this)
-
-        cbLocked.setOnCheckedChangeListener(this)
-
-
-        cbConfirmFollow.setOnCheckedChangeListener(this)
-        cbConfirmFollowLockedUser.setOnCheckedChangeListener(this)
-        cbConfirmUnfollow.setOnCheckedChangeListener(this)
-        cbConfirmBoost.setOnCheckedChangeListener(this)
-        cbConfirmFavourite.setOnCheckedChangeListener(this)
-        cbConfirmUnboost.setOnCheckedChangeListener(this)
-        cbConfirmUnfavourite.setOnCheckedChangeListener(this)
-        cbConfirmToot.setOnCheckedChangeListener(this)
-
         btnNotificationSoundEdit = findViewById(R.id.btnNotificationSoundEdit)
         btnNotificationSoundReset = findViewById(R.id.btnNotificationSoundReset)
-        btnNotificationSoundEdit.setOnClickListener(this)
-        btnNotificationSoundReset.setOnClickListener(this)
-
         btnNotificationStyleEdit = findViewById(R.id.btnNotificationStyleEdit)
         btnNotificationStyleEditReply = findViewById(R.id.btnNotificationStyleEditReply)
-        btnNotificationStyleEdit.setOnClickListener(this)
-        btnNotificationStyleEditReply.setOnClickListener(this)
-
-
-        spResizeImage.onItemSelectedListener = this
-
-        spPushPolicy.onItemSelectedListener = this
-
         btnNotificationStyleEditReply.vg(Pref.bpSeparateReplyNotificationGroup(pref))
 
         name_invalidator = NetworkEmojiInvalidator(handler, etDisplayName)
@@ -524,6 +492,57 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
             }
         })
 
+        arrayOf(
+            btnOpenBrowser,
+            btnPushSubscription,
+            btnPushSubscriptionNotForce,
+            btnResetNotificationTracking,
+            btnAccessToken,
+            btnInputAccessToken,
+            btnAccountRemove,
+            btnLoadPreference,
+            btnVisibility,
+            btnUserCustom,
+            btnProfileAvatar,
+            btnProfileHeader,
+            btnDisplayName,
+            btnNote,
+            btnFields,
+            btnNotificationSoundEdit,
+            btnNotificationSoundReset,
+            btnNotificationStyleEdit,
+            btnNotificationStyleEditReply,
+        ).forEach { it.setOnClickListener(this) }
+
+        arrayOf(
+            swNSFWOpen,
+            swDontShowTimeout,
+            swExpandCW,
+            swMarkSensitive,
+            cbNotificationMention,
+            cbNotificationBoost,
+            cbNotificationFavourite,
+            cbNotificationFollow,
+            cbNotificationFollowRequest,
+            cbNotificationReaction,
+            cbNotificationVote,
+            cbNotificationPost,
+            cbLocked,
+            cbConfirmFollow,
+            cbConfirmFollowLockedUser,
+            cbConfirmUnfollow,
+            cbConfirmBoost,
+            cbConfirmFavourite,
+            cbConfirmUnboost,
+            cbConfirmUnfavourite,
+            cbConfirmToot,
+            cbConfirmReaction,
+        ).forEach { it.setOnCheckedChangeListener(this) }
+
+        arrayOf(
+            spResizeImage,
+            spPushPolicy,
+        ).forEach { it.onItemSelectedListener = this }
     }
 
     private fun EditText.parseInt(): Int? {
@@ -568,6 +587,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
 
 
         cbConfirmToot.isChecked = a.confirm_post
+        cbConfirmReaction.isChecked = a.confirm_reaction
 
         notification_sound_uri = a.sound_uri
 
@@ -577,36 +597,46 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         loading = false
 
         val enabled = !a.isPseudo
-        btnAccessToken.isEnabled = enabled
-        btnInputAccessToken.isEnabled = enabled
-        btnVisibility.isEnabled = enabled
-        btnPushSubscription.isEnabled = enabled
-        btnPushSubscriptionNotForce.isEnabled = enabled
-        btnResetNotificationTracking.isEnabled = enabled
-        btnNotificationSoundEdit.isEnabled = Build.VERSION.SDK_INT < 26 && enabled
-        btnNotificationSoundReset.isEnabled = Build.VERSION.SDK_INT < 26 && enabled
-        btnNotificationStyleEdit.isEnabled = Build.VERSION.SDK_INT >= 26 && enabled
-        btnNotificationStyleEditReply.isEnabled = Build.VERSION.SDK_INT >= 26 && enabled
 
-        cbNotificationMention.isEnabled = enabled
-        cbNotificationBoost.isEnabled = enabled
-        cbNotificationFavourite.isEnabled = enabled
-        cbNotificationFollow.isEnabled = enabled
-        cbNotificationFollowRequest.isEnabled = enabled
-        cbNotificationReaction.isEnabled = enabled
-        cbNotificationVote.isEnabled = enabled
-        cbNotificationPost.isEnabled = enabled
+        arrayOf(
+            btnAccessToken,
+            btnInputAccessToken,
+            btnVisibility,
+            btnPushSubscription,
+            btnPushSubscriptionNotForce,
+            btnResetNotificationTracking,
+            cbNotificationMention,
+            cbNotificationBoost,
+            cbNotificationFavourite,
+            cbNotificationFollow,
+            cbNotificationFollowRequest,
+            cbNotificationReaction,
+            cbNotificationVote,
+            cbNotificationPost,
+            cbConfirmFollow,
+            cbConfirmFollowLockedUser,
+            cbConfirmUnfollow,
+            cbConfirmBoost,
+            cbConfirmFavourite,
+            cbConfirmUnboost,
+            cbConfirmUnfavourite,
+            cbConfirmToot,
+            cbConfirmReaction,
+        ).forEach { it.isEnabledAlpha = enabled }
 
-        cbConfirmFollow.isEnabled = enabled
-        cbConfirmFollowLockedUser.isEnabled = enabled
-        cbConfirmUnfollow.isEnabled = enabled
-        cbConfirmBoost.isEnabled = enabled
-        cbConfirmFavourite.isEnabled = enabled
-        cbConfirmUnboost.isEnabled = enabled
-        cbConfirmUnfavourite.isEnabled = enabled
-        cbConfirmToot.isEnabled = enabled
+        val enabledOldNotification = enabled && Build.VERSION.SDK_INT < 26
+        arrayOf(
+            btnNotificationSoundEdit,
+            btnNotificationSoundReset,
+        ).forEach { it.isEnabledAlpha = enabledOldNotification }
 
-        val ti = TootInstance.getCached(a.apiHost.ascii)
+        val enabledNewNotification = enabled && Build.VERSION.SDK_INT >= 26
+        arrayOf(
+            btnNotificationStyleEdit,
+            btnNotificationStyleEditReply,
+        ).forEach { it.isEnabledAlpha = enabledNewNotification }
+
+        val ti = TootInstance.getCached(a)
         if (ti == null) {
             etMediaSizeMax.setText(a.image_max_megabytes ?: "")
             etMovieSizeMax.setText(a.movie_max_megabytes ?: "")
@@ -675,6 +705,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         account.confirm_unboost = cbConfirmUnboost.isChecked
         account.confirm_unfavourite = cbConfirmUnfavourite.isChecked
         account.confirm_post = cbConfirmToot.isChecked
+        account.confirm_reaction = cbConfirmReaction.isChecked
         account.default_text = etDefaultText.text.toString()
 
         val num = etMaxTootChars.parseInt()
@@ -723,17 +754,15 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
             R.id.btnLoadPreference -> performLoadPreference()
             R.id.btnVisibility -> performVisibility()
             R.id.btnOpenBrowser -> openBrowser("https://${account.apiHost.ascii}/")
-            R.id.btnPushSubscription -> startTest(force = true)
-            R.id.btnPushSubscriptionNotForce -> startTest(force = false)
+            R.id.btnPushSubscription -> updatePushSubscription(force = true)
+            R.id.btnPushSubscriptionNotForce -> updatePushSubscription(force = false)
             R.id.btnResetNotificationTracking ->
                 PollingWorker.resetNotificationTracking(this, account)
 
-            R.id.btnUserCustom -> ActNickname.open(
-                this,
-                account.acct,
-                false,
-                REQUEST_CODE_ACCT_CUSTOMIZE
-            )
+            R.id.btnUserCustom -> arShowAcctColor.launch(
+                ActNickname.createIntent(this, account.acct, false),
+
+                )
 
             R.id.btnNotificationSoundEdit -> openNotificationSoundPicker()
 
@@ -815,19 +844,14 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
     }
 
     private fun performLoadPreference() {
-
-        TootTaskRunner(this).run(account, object : TootTask {
-            override suspend fun background(client: TootApiClient): TootApiResult? {
-                return client.request("/api/v1/preferences")
-            }
-
-            override suspend fun handleResult(result: TootApiResult?) {
-                result ?: return
-
+        launchMain {
+            runApiTask(account) { client ->
+                client.request("/api/v1/preferences")
+            }?.let { result ->
                 val json = result.jsonObject
                 if (json == null) {
                     showToast(true, result.error)
-                    return
+                    return@let
                 }
 
                 var bChanged = false
@@ -865,72 +889,32 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                     if (bChanged) saveUIToData()
                 }
             }
-        })
+        }
     }
 
     ///////////////////////////////////////////////////
+
     private fun performAccountRemove() {
         AlertDialog.Builder(this)
             .setTitle(R.string.confirm)
             .setMessage(R.string.confirm_account_remove)
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.ok) { _, _ ->
-                account.delete()
-
-                val pref = pref()
-                if (account.db_id == Pref.lpTabletTootDefaultAccount(pref)) {
-                    pref.edit().put(Pref.lpTabletTootDefaultAccount, -1L).apply()
-                }
-
+                accountRemove(account)
                 finish()
-
-                GlobalScope.launch(Dispatchers.IO) {
-                    try {
-                        val install_id = PrefDevice.prefDevice(this@ActAccountSetting)
-                            .getString(PrefDevice.KEY_INSTALL_ID, null)
-                        if (install_id?.isEmpty() != false)
-                            error("missing install_id")
-
-                        val tag = account.notification_tag
-                        if (tag?.isEmpty() != false)
-                            error("missing notification_tag")
-
-                        val call = App1.ok_http_client.newCall(
-                            ("instance_url=" + "https://${account.apiHost.ascii}".encodePercent()
-                                + "&app_id=" + packageName.encodePercent()
-                                + "&tag=" + tag
-                                )
-                                .toFormRequestBody()
-                                .toPost()
-                                .url(PollingWorker.APP_SERVER + "/unregister")
-                                .build()
-                        )
-
-                        val response = call.await()
-
-                        log.e("performAccountRemove: %s", response)
-                    } catch (ex: Throwable) {
-                        log.trace(ex, "performAccountRemove failed.")
-                    }
-                }
             }
             .show()
     }
 
     ///////////////////////////////////////////////////
     private fun performAccessToken() {
-
-        TootTaskRunner(this@ActAccountSetting).run(account, object : TootTask {
-            override suspend fun background(client: TootApiClient): TootApiResult? {
-                return client.authentication1(
+        launchMain {
+            runApiTask(account) { client ->
+                client.authentication1(
                     Pref.spClientName(this@ActAccountSetting),
                     forceUpdateClient = true
                 )
-            }
-
-            override suspend fun handleResult(result: TootApiResult?) {
-                result ?: return // cancelled.
-
+            }?.let { result ->
                 val uri = result.string.mayUri()
                 val error = result.error
                 when {
@@ -947,8 +931,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                     }
                 }
             }
-        })
-
+        }
     }
 
     private fun inputAccessToken() {
@@ -971,7 +954,9 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         }
 
         val chooser = Intent.createChooser(intent, getString(R.string.notification_sound))
-        startActivityForResult(chooser, REQUEST_CODE_NOTIFICATION_SOUND)
+
+        arNotificationSound.launch(chooser)
+
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -990,74 +975,65 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         etNote.setText(loadingText)
 
         // 初期状態では編集不可能
-        btnProfileAvatar.isEnabled = false
-        btnProfileHeader.isEnabled = false
-        etDisplayName.isEnabled = false
-        btnDisplayName.isEnabled = false
-        etNote.isEnabled = false
-        btnNote.isEnabled = false
-        cbLocked.isEnabled = false
+        arrayOf(
+            btnProfileAvatar,
+            btnProfileHeader,
+            etDisplayName,
+            btnDisplayName,
+            etNote,
+            btnNote,
+            cbLocked,
+        ).forEach { it.isEnabledAlpha = false }
 
         for (et in listEtFieldName) {
             et.setText(loadingText)
-            et.isEnabled = false
+            et.isEnabledAlpha = false
         }
         for (et in listEtFieldValue) {
             et.setText(loadingText)
-            et.isEnabled = false
+            et.isEnabledAlpha = false
         }
 
         // 疑似アカウントなら編集不可のまま
         if (!account.isPseudo) loadProfile()
     }
 
+    // サーバから情報をロードする
     private fun loadProfile() {
-        // サーバから情報をロードする
-
-        TootTaskRunner(this).run(account, object : TootTask {
-
-            var data: TootAccount? = null
-            override suspend fun background(client: TootApiClient): TootApiResult? {
+        launchMain {
+            var resultAccount: TootAccount? = null
+            runApiTask(account) { client ->
                 if (account.isMisskey) {
-                    val result = client.request(
+                    client.request(
                         "/api/i",
                         account.putMisskeyApiToken().toPostRequestBuilder()
-                    )
-                    val jsonObject = result?.jsonObject
-                    if (jsonObject != null) {
-                        data = TootParser(this@ActAccountSetting, account).account(jsonObject)
-                        if (data == null) return TootApiResult("TootAccount parse failed.")
+                    )?.also { result ->
+                        val jsonObject = result.jsonObject
+                        if (jsonObject != null) {
+                            resultAccount = TootParser(this, account).account(jsonObject)
+                                ?: return@runApiTask TootApiResult("TootAccount parse failed.")
+                        }
                     }
-                    return result
-
                 } else {
+                    val r0 = account.checkConfirmed(this, client)
+                    if (r0 == null || r0.error != null) return@runApiTask r0
 
-                    var result = account.checkConfirmed(this@ActAccountSetting, client)
-                    if (result == null || result.error != null) return result
-
-                    result = client.request("/api/v1/accounts/verify_credentials")
-                    val jsonObject = result?.jsonObject
-                    if (jsonObject != null) {
-                        data = TootParser(this@ActAccountSetting, account).account(jsonObject)
-                        if (data == null) return TootApiResult("TootAccount parse failed.")
-                    }
-                    return result
-
+                    client.request("/api/v1/accounts/verify_credentials")
+                        ?.also { result ->
+                            val jsonObject = result.jsonObject
+                            if (jsonObject != null) {
+                                resultAccount = TootParser(this@ActAccountSetting, account).account(jsonObject)
+                                    ?: return@runApiTask TootApiResult("TootAccount parse failed.")
+                            }
+                        }
+                }
+            }?.let { result ->
+                when (val account = resultAccount) {
+                    null -> showToast(true, result.error)
+                    else -> showProfile(account)
                 }
             }
-
-            override suspend fun handleResult(result: TootApiResult?) {
-                if (result == null) return  // cancelled.
-
-                val data = this.data
-                if (data != null) {
-                    showProfile(data)
-                } else {
-                    showToast(true, result.error)
-                }
-
-            }
-        })
+        }
     }
 
     var profile_busy: Boolean = false
@@ -1112,13 +1088,15 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
             cbLocked.isChecked = src.locked
 
             // 編集可能にする
-            btnProfileAvatar.isEnabled = true
-            btnProfileHeader.isEnabled = true
-            etDisplayName.isEnabled = true
-            btnDisplayName.isEnabled = true
-            etNote.isEnabled = true
-            btnNote.isEnabled = true
-            cbLocked.isEnabled = true
+            arrayOf(
+                btnProfileAvatar,
+                btnProfileHeader,
+                etDisplayName,
+                btnDisplayName,
+                etNote,
+                btnNote,
+                cbLocked,
+            ).forEach { it.isEnabledAlpha = true }
 
             if (src.source?.fields != null) {
                 val fields = src.source.fields
@@ -1135,7 +1113,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                             }
                         )
                         et.setText(text)
-                        et.isEnabled = true
+                        et.isEnabledAlpha = true
                         val invalidator = NetworkEmojiInvalidator(handler, et)
                         invalidator.register(text)
                     }
@@ -1151,7 +1129,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                             }
                         )
                         et.setText(text)
-                        et.isEnabled = true
+                        et.isEnabledAlpha = true
                         val invalidator = NetworkEmojiInvalidator(handler, et)
                         invalidator.register(text)
                     }
@@ -1172,7 +1150,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                             }
                         )
                         et.setText(text)
-                        et.isEnabled = true
+                        et.isEnabledAlpha = true
                         val invalidator = NetworkEmojiInvalidator(handler, et)
                         invalidator.register(text)
                     }
@@ -1189,7 +1167,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                             }
                         )
                         et.text = text
-                        et.isEnabled = true
+                        et.isEnabledAlpha = true
                         val invalidator = NetworkEmojiInvalidator(handler, et)
                         invalidator.register(text)
                     }
@@ -1205,69 +1183,68 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         updateCredential(listOf(Pair(key, value)))
     }
 
-    private fun updateCredential(args: List<Pair<String, Any>>) {
 
-        TootTaskRunner(this).run(account, object : TootTask {
+    private suspend fun uploadImageMisskey(
+        client: TootApiClient,
+        opener: InputStreamOpener
+    ): Pair<TootApiResult?, TootAttachment?> {
 
-            private suspend fun uploadImageMisskey(
-                client: TootApiClient,
-                opener: InputStreamOpener
-            ): Pair<TootApiResult?, TootAttachment?> {
+        val size = getStreamSize(true, opener.open())
 
-                val size = getStreamSize(true, opener.open())
+        val multipart_builder = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
 
-                val multipart_builder = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
+        val apiKey =
+            account.token_info?.string(TootApiClient.KEY_API_KEY_MISSKEY)
+        if (apiKey?.isNotEmpty() == true) {
+            multipart_builder.addFormDataPart("i", apiKey)
+        }
 
-                val apiKey =
-                    account.token_info?.string(TootApiClient.KEY_API_KEY_MISSKEY)
-                if (apiKey?.isNotEmpty() == true) {
-                    multipart_builder.addFormDataPart("i", apiKey)
+        multipart_builder.addFormDataPart(
+            "file",
+            getDocumentName(contentResolver, opener.uri),
+            object : RequestBody() {
+                override fun contentType(): MediaType {
+                    return opener.mimeType.toMediaType()
                 }
 
-                multipart_builder.addFormDataPart(
-                    "file",
-                    getDocumentName(contentResolver, opener.uri),
-                    object : RequestBody() {
-                        override fun contentType(): MediaType {
-                            return opener.mimeType.toMediaType()
-                        }
-
-                        override fun contentLength(): Long {
-                            return size
-                        }
-
-                        override fun writeTo(sink: BufferedSink) {
-                            opener.open().use { inData ->
-                                val tmp = ByteArray(4096)
-                                while (true) {
-                                    val r = inData.read(tmp, 0, tmp.size)
-                                    if (r <= 0) break
-                                    sink.write(tmp, 0, r)
-                                }
-                            }
-                        }
-                    }
-                )
-
-                var ta: TootAttachment? = null
-                val result = client.request(
-                    "/api/drive/files/create",
-                    multipart_builder.build().toPost()
-                )?.also { result ->
-                    val jsonObject = result.jsonObject
-                    if (jsonObject != null) {
-                        ta = parseItem(::TootAttachment, ServiceType.MISSKEY, jsonObject)
-                        if (ta == null) result.error = "TootAttachment.parse failed"
-                    }
+                override fun contentLength(): Long {
+                    return size
                 }
 
-                return Pair(result, ta)
+                override fun writeTo(sink: BufferedSink) {
+                    opener.open().use { inData ->
+                        val tmp = ByteArray(4096)
+                        while (true) {
+                            val r = inData.read(tmp, 0, tmp.size)
+                            if (r <= 0) break
+                            sink.write(tmp, 0, r)
+                        }
+                    }
+                }
             }
+        )
 
-            var data: TootAccount? = null
-            override suspend fun background(client: TootApiClient): TootApiResult? {
+        var ta: TootAttachment? = null
+        val result = client.request(
+            "/api/drive/files/create",
+            multipart_builder.build().toPost()
+        )?.also { result ->
+            val jsonObject = result.jsonObject
+            if (jsonObject != null) {
+                ta = parseItem(::TootAttachment, ServiceType.MISSKEY, jsonObject)
+                if (ta == null) result.error = "TootAttachment.parse failed"
+            }
+        }
 
+        return Pair(result, ta)
+    }
+
+    private fun updateCredential(args: List<Pair<String, Any>>) {
+        launchMain {
+            var resultAccount: TootAccount? = null
+
+            runApiTask(account) { client ->
                 try {
                     if (account.isMisskey) {
                         val params = account.putMisskeyApiToken()
@@ -1282,7 +1259,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                                 "display_name" -> "name"
                                 "note" -> "description"
                                 "locked" -> "isLocked"
-                                else -> return TootApiResult("Misskey does not support property '${key}'")
+                                else -> return@runApiTask TootApiResult("Misskey does not support property '${key}'")
                             }
 
                             when (value) {
@@ -1291,23 +1268,19 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
 
                                 is InputStreamOpener -> {
                                     val (result, ta) = uploadImageMisskey(client, value)
-                                    ta ?: return result
+                                    ta ?: return@runApiTask result
                                     params[misskeyKey] = ta.id
                                 }
                             }
                         }
 
-                        val result =
-                            client.request("/api/i/update", params.toPostRequestBuilder())
-                        val jsonObject = result?.jsonObject
-                        if (jsonObject != null) {
-                            val a = TootParser(this@ActAccountSetting, account).account(jsonObject)
-                                ?: return TootApiResult("TootAccount parse failed.")
-                            data = a
-                        }
-
-                        return result
-
+                        client.request("/api/i/update", params.toPostRequestBuilder())
+                            ?.also { result ->
+                                result.jsonObject?.let {
+                                    resultAccount = TootParser(this, account).account(it)
+                                        ?: return@runApiTask TootApiResult("TootAccount parse failed.")
+                                }
+                            }
                     } else {
                         val multipart_body_builder = MultipartBody.Builder()
                             .setType(MultipartBody.FORM)
@@ -1332,9 +1305,8 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                                     key,
                                     fileName,
                                     object : RequestBody() {
-                                        override fun contentType(): MediaType? {
-                                            return value.mimeType.toMediaType()
-                                        }
+                                        override fun contentType(): MediaType =
+                                            value.mimeType.toMediaType()
 
                                         override fun writeTo(sink: BufferedSink) {
                                             value.open().use { inData ->
@@ -1350,19 +1322,15 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                             }
                         }
 
-                        val result = client.request(
+                        client.request(
                             "/api/v1/accounts/update_credentials",
                             multipart_body_builder.build().toPatch()
-                        )
-                        val jsonObject = result?.jsonObject
-                        if (jsonObject != null) {
-                            val a = TootParser(this@ActAccountSetting, account).account(jsonObject)
-                                ?: return TootApiResult("TootAccount parse failed.")
-                            data = a
+                        )?.also { result ->
+                            result.jsonObject?.let {
+                                resultAccount = TootParser(this@ActAccountSetting, account).account(it)
+                                    ?: return@runApiTask TootApiResult("TootAccount parse failed.")
+                            }
                         }
-
-                        return result
-
                     }
 
                 } finally {
@@ -1371,12 +1339,8 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                         (value as? InputStreamOpener)?.deleteTempFile()
                     }
                 }
-            }
-
-            override suspend fun handleResult(result: TootApiResult?) {
-                if (result == null) return  // cancelled.
-
-                val data = this.data
+            }?.let { result ->
+                val data = resultAccount
                 if (data != null) {
                     showProfile(data)
                 } else {
@@ -1392,8 +1356,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                     }
                 }
             }
-        })
-
+        }
     }
 
     private fun sendDisplayName(bConfirmed: Boolean = false) {
@@ -1504,22 +1467,17 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
             return
         }
 
+        val propName = when (permission_request_code) {
+            PERMISSION_REQUEST_HEADER -> "header"
+            else -> "avatar"
+        }
+
         val a = ActionsDialog()
         a.addAction(getString(R.string.pick_image)) {
-            performAttachment(
-                if (permission_request_code == PERMISSION_REQUEST_AVATAR)
-                    REQUEST_CODE_AVATAR_ATTACHMENT
-                else
-                    REQUEST_CODE_HEADER_ATTACHMENT
-            )
+            performAttachment(propName)
         }
         a.addAction(getString(R.string.image_capture)) {
-            performCamera(
-                if (permission_request_code == PERMISSION_REQUEST_AVATAR)
-                    REQUEST_CODE_AVATAR_CAMERA
-                else
-                    REQUEST_CODE_HEADER_CAMERA
-            )
+            performCamera(propName)
         }
         a.show(this, null)
     }
@@ -1548,12 +1506,15 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                     showToast(true, R.string.missing_permission_to_access_media)
                 }
         }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
-    private fun performAttachment(request_code: Int) {
+    private fun performAttachment(propName: String) {
         try {
+            state.propName = propName
             val intent = intentGetContent(false, getString(R.string.pick_image), arrayOf("image/*"))
-            startActivityForResult(intent, request_code)
+            arAddAttachment.launch(intent)
+
         } catch (ex: Throwable) {
             log.trace(ex, "performAttachment failed.")
             showToast(ex, "performAttachment failed.")
@@ -1561,7 +1522,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
 
     }
 
-    private fun performCamera(request_code: Int) {
+    private fun performCamera(propName: String) {
 
         try {
             // カメラで撮影
@@ -1569,13 +1530,14 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
             val values = ContentValues()
             values.put(MediaStore.Images.Media.TITLE, filename)
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            uriCameraImage =
-                contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            state.uriCameraImage = uri
 
             val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-            intent.putExtra(MediaStore.EXTRA_OUTPUT, uriCameraImage)
+            intent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
 
-            startActivityForResult(intent, request_code)
+            state.propName = propName
+            arCameraImage.launch(intent)
         } catch (ex: Throwable) {
             log.trace(ex, "opening camera app failed.")
             showToast(ex, "opening camera app failed.")
@@ -1678,7 +1640,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
         }
     }
 
-    private fun addAttachment(request_code: Int, uri: Uri, mime_type: String?) {
+    private fun addAttachment(propName: String, uri: Uri, mime_type: String?) {
 
         if (mime_type == null) {
             showToast(false, "mime type is not provided.")
@@ -1690,32 +1652,21 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
             return
         }
 
-        runWithProgress(
-            "preparing image",
-            { createOpener(uri, mime_type) },
-            {
-                updateCredential(
-                    when (request_code) {
-                        REQUEST_CODE_HEADER_ATTACHMENT, REQUEST_CODE_HEADER_CAMERA -> "header"
-                        else -> "avatar"
-                    },
-                    it
-                )
-            }
-        )
+        launchMain {
+            runWithProgress(
+                "preparing image",
+                { createOpener(uri, mime_type) },
+                { updateCredential(propName, it) }
+            )
+        }
     }
 
-    private fun startTest(force: Boolean) {
+    private fun updatePushSubscription(force: Boolean) {
         val wps = PushSubscriptionHelper(applicationContext, account, verbose = true)
-
-        TootTaskRunner(this).run(account, object : TootTask {
-
-            override suspend fun background(client: TootApiClient): TootApiResult? {
-                return wps.updateSubscription(client, force = force)
-            }
-
-            override suspend fun handleResult(result: TootApiResult?) {
-                result ?: return
+        launchMain {
+            runApiTask(account) { client ->
+                wps.updateSubscription(client, force = force)
+            }?.let {
                 val log = wps.logString
                 if (log.isNotEmpty()) {
                     AlertDialog.Builder(this@ActAccountSetting)
@@ -1724,9 +1675,7 @@ class ActAccountSetting : AsyncActivity(), View.OnClickListener,
                         .show()
                 }
             }
-        })
+        }
     }
-
-
 }
 

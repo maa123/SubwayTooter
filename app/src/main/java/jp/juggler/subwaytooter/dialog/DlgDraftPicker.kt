@@ -14,10 +14,7 @@ import jp.juggler.subwaytooter.ActPost
 import jp.juggler.subwaytooter.R
 import jp.juggler.subwaytooter.api.entity.TootStatus
 import jp.juggler.subwaytooter.table.PostDraft
-import jp.juggler.util.JsonObject
-import jp.juggler.util.LogCategory
-import jp.juggler.util.dismissSafe
-import jp.juggler.util.showToast
+import jp.juggler.util.*
 import kotlinx.coroutines.*
 
 class DlgDraftPicker : AdapterView.OnItemClickListener, AdapterView.OnItemLongClickListener,
@@ -48,11 +45,11 @@ class DlgDraftPicker : AdapterView.OnItemClickListener, AdapterView.OnItemLongCl
     }
 
     override fun onItemLongClick(
-		parent: AdapterView<*>,
-		view: View,
-		position: Int,
-		id: Long
-	): Boolean {
+        parent: AdapterView<*>,
+        view: View,
+        position: Int,
+        id: Long
+    ): Boolean {
 
         val draft = getPostDraft(position)
         if (draft != null) {
@@ -118,17 +115,17 @@ class DlgDraftPicker : AdapterView.OnItemClickListener, AdapterView.OnItemLongCl
         // cancel old task
         task?.cancel()
 
-        task = GlobalScope.launch(Dispatchers.Main) {
+        task = launchMain{
             val cursor = try {
                 withContext(Dispatchers.IO) {
                     PostDraft.createCursor()
                 } ?: error("cursor is null")
             } catch (ex: CancellationException) {
-                return@launch
+                return@launchMain
             } catch (ex: Throwable) {
                 log.trace(ex)
                 activity.showToast(ex, "failed to loading drafts.")
-                return@launch
+                return@launchMain
             }
             updateCursor(cursor)
         }

@@ -397,9 +397,8 @@ class PollingWorker private constructor(contextArg: Context) {
 
     private val workerNotifier = Channel<Unit>(capacity = Channel.CONFLATED)
 
-    fun notifyWorker() {
-        GlobalScope.launch { workerNotifier.send(Unit) }
-    }
+    fun notifyWorker() =
+         workerNotifier.trySend(Unit)
 
     init {
         log.d("init")
@@ -448,7 +447,7 @@ class PollingWorker private constructor(contextArg: Context) {
 
         wifi_lock.setReferenceCounted(false)
 
-        GlobalScope.launch(Dispatchers.Default) { worker() }
+        launchDefault { worker() }
     }
 
     @SuppressLint("WakelockTimeout")
@@ -601,9 +600,7 @@ class PollingWorker private constructor(contextArg: Context) {
             startedJobList.add(item)
         }
 
-        GlobalScope.launch(Dispatchers.Default) {
-            workerNotifier.send(Unit)
-        }
+        workerNotifier.trySend(Unit)
     }
 
 

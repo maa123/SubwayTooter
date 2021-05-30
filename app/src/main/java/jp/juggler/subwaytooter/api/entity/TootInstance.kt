@@ -10,10 +10,7 @@ import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.subwaytooter.util.LinkHelper
 import jp.juggler.subwaytooter.util.VersionString
 import jp.juggler.util.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.launch
 import okhttp3.Request
 import java.util.*
 import java.util.regex.Pattern
@@ -28,39 +25,58 @@ enum class InstanceType {
     Pleroma
 }
 
-enum class CapabilitySource {
-    Fedibird,
-}
+object InstanceCapability {
+//    FavouriteHashtag(CapabilitySource.Fedibird, "favourite_hashtag"),
+//    FavouriteDomain(CapabilitySource.Fedibird, "favourite_domain"),
+//    StatusExpire(CapabilitySource.Fedibird, "status_expire"),
+//    FollowNoDelivery(CapabilitySource.Fedibird, "follow_no_delivery"),
+//    FollowHashtag(CapabilitySource.Fedibird, "follow_hashtag"),
+//    SubscribeAccount(CapabilitySource.Fedibird, "subscribe_account"),
+//    SubscribeDomain(CapabilitySource.Fedibird, "subscribe_domain"),
+//    SubscribeKeyword(CapabilitySource.Fedibird, "subscribe_keyword"),
+//    TimelineNoLocal(CapabilitySource.Fedibird, "timeline_no_local"),
+//    TimelineDomain(CapabilitySource.Fedibird, "timeline_domain"),
+//    TimelineGroup(CapabilitySource.Fedibird, "timeline_group"),
+//    TimelineGroupDirectory(CapabilitySource.Fedibird, "timeline_group_directory"),
 
-enum class InstanceCapability(
-    private val capabilitySource: CapabilitySource,
-    private val id: String
-) {
-    FavouriteHashtag(CapabilitySource.Fedibird, "favourite_hashtag"),
-    FavouriteDomain(CapabilitySource.Fedibird, "favourite_domain"),
-    StatusExpire(CapabilitySource.Fedibird, "status_expire"),
-    FollowNoDelivery(CapabilitySource.Fedibird, "follow_no_delivery"),
-    FollowHashtag(CapabilitySource.Fedibird, "follow_hashtag"),
-    SubscribeAccount(CapabilitySource.Fedibird, "subscribe_account"),
-    SubscribeDomain(CapabilitySource.Fedibird, "subscribe_domain"),
-    SubscribeKeyword(CapabilitySource.Fedibird, "subscribe_keyword"),
-    TimelineNoLocal(CapabilitySource.Fedibird, "timeline_no_local"),
-    TimelineDomain(CapabilitySource.Fedibird, "timeline_domain"),
-    TimelineGroup(CapabilitySource.Fedibird, "timeline_group"),
-    TimelineGroupDirectory(CapabilitySource.Fedibird, "timeline_group_directory"),
-    VisibilityMutual(CapabilitySource.Fedibird, "visibility_mutual"),
-    VisibilityLimited(CapabilitySource.Fedibird, "visibility_limited"),
-    ;
+    fun quote(ti:TootInstance?) =
+        ti?.feature_quote == true
 
-    fun hasCapability(instance: TootInstance): Boolean {
-        when (capabilitySource) {
-            CapabilitySource.Fedibird -> {
-                if (instance.fedibird_capabilities?.any { it == id } == true) return true
-            }
+    fun visibilityMutual(ti: TootInstance?) =
+        ti?.fedibird_capabilities?.contains("visibility_mutual") == true
+
+
+    fun visibilityLimited(ti: TootInstance?) =
+        ti?.fedibird_capabilities?.contains("visibility_limited") == true
+
+
+    fun emojiReaction(ai: SavedAccount, ti: TootInstance?) =
+        when {
+            ai.isPseudo -> false
+            ai.isMisskey -> true
+            else ->
+                ti?.fedibird_capabilities?.contains("emoji_reaction") == true ||
+                    ti?.pleromaFeatures?.contains("pleroma_emoji_reactions") == true
         }
-        // XXX: もし機能がMastodon公式に取り込まれたならバージョン番号で判断できるはず
-        return false
-    }
+
+    fun canMultipleReaction(ai: SavedAccount, ti: TootInstance?=TootInstance.getCached(ai)) =
+        when {
+            ai.isPseudo -> false
+            ai.isMisskey -> false
+            else -> ti?.pleromaFeatures?.contains("pleroma_emoji_reactions") == true
+        }
+
+    fun listMyReactions(ai: SavedAccount, ti: TootInstance?) =
+        when {
+            ai.isPseudo -> false
+            ai.isMisskey ->
+                // m544 extension
+                ti?.misskeyEndpoints?.contains("i/reactions") == true
+            else ->
+                // fedibird extension
+                ti?.fedibird_capabilities?.contains("emoji_reaction") == true
+        }
+
 }
 
 class TootInstance(parser: TootParser, src: JsonObject) {
@@ -68,7 +84,7 @@ class TootInstance(parser: TootParser, src: JsonObject) {
     // いつ取得したか(内部利用)
     private var time_parse: Long = SystemClock.elapsedRealtime()
 
-    val isExpire: Boolean
+    val isExpired: Boolean
         get() = SystemClock.elapsedRealtime() - time_parse >= EXPIRE
 
     //	URI of the current instance
@@ -121,12 +137,18 @@ class TootInstance(parser: TootParser, src: JsonObject) {
 
     var feature_quote = false
 
-    var fedibird_capabilities: JsonArray? = null
+    var fedibird_capabilities: Set<String>? = null
+
+    var misskeyEndpoints: Set<String>? = null
+
+    var pleromaFeatures: Set<String>? = null
 
     // XXX: urls をパースしてない。使ってないから…
 
     init {
         if (parser.serviceType == ServiceType.MISSKEY) {
+
+            this.misskeyEndpoints = src.jsonArray("_endpoints")?.stringList()?.toSet()
 
             this.uri = parser.apiHost.ascii
             this.title = parser.apiHost.pretty
@@ -192,7 +214,8 @@ class TootInstance(parser: TootParser, src: JsonObject) {
 
             this.invites_enabled = src.boolean("invites_enabled")
 
-            this.fedibird_capabilities = src.jsonArray("fedibird_capabilities")
+            this.fedibird_capabilities = src.jsonArray("fedibird_capabilities")?.stringList()?.toSet()
+            this.pleromaFeatures = src.jsonObject("pleroma")?.jsonObject("metadata")?.jsonArray("features")?.stringList()?.toSet()
         }
     }
 
@@ -221,8 +244,6 @@ class TootInstance(parser: TootParser, src: JsonObject) {
         val i = VersionString.compare(decoded_version, check)
         return i >= 0
     }
-
-    fun hasCapability(cap: InstanceCapability) = cap.hasCapability(this)
 
     companion object {
 
@@ -274,7 +295,7 @@ class TootInstance(parser: TootParser, src: JsonObject) {
             if (sendRequest(result) {
                     val builder = Request.Builder().url("https://${apiHost?.ascii}/api/v1/instance")
 
-                    (forceAccessToken ?: account?.getAccessToken() )
+                    (forceAccessToken ?: account?.getAccessToken())
                         ?.notEmpty()?.let { builder.header("Authorization", "Bearer $it") }
                     builder.build()
                 }
@@ -282,6 +303,26 @@ class TootInstance(parser: TootParser, src: JsonObject) {
                 parseJson(result) ?: return null
             }
 
+            return result
+        }
+
+        private suspend fun TootApiClient.getMisskeyEndpoints(
+            forceAccessToken: String? = null
+        ): TootApiResult? {
+            val result = TootApiResult.makeWithCaption(apiHost?.pretty)
+            if (result.error != null) return result
+
+            if (sendRequest(result) {
+                    jsonObject {
+                        (forceAccessToken ?: account?.misskeyApiToken)
+                            ?.notEmpty()?.let { put("i", it) }
+                    }.toPostRequestBuilder()
+                        .url("https://${apiHost?.ascii}/api/endpoints")
+                        .build()
+                }
+            ) {
+                parseJson(result) ?: return null
+            }
             return result
         }
 
@@ -295,7 +336,7 @@ class TootInstance(parser: TootParser, src: JsonObject) {
             if (sendRequest(result) {
                     jsonObject {
                         put("dummy", 1)
-                        (forceAccessToken ?: account?.misskeyApiToken )
+                        (forceAccessToken ?: account?.misskeyApiToken)
                             ?.notEmpty()?.let { put("i", it) }
                     }.toPostRequestBuilder()
                         .url("https://${apiHost?.ascii}/api/meta")
@@ -309,6 +350,10 @@ class TootInstance(parser: TootParser, src: JsonObject) {
                     if (m.find()) {
                         put(TootApiClient.KEY_MISSKEY_VERSION, max(1, m.groupEx(1)!!.toInt()))
                     }
+
+                    // add endpoints
+                    val r2 = getMisskeyEndpoints(forceAccessToken)
+                    r2?.jsonArray?.let { result.jsonObject?.put("_endpoints", it) }
                 }
             }
             return result
@@ -356,7 +401,6 @@ class TootInstance(parser: TootParser, src: JsonObject) {
                 pair.first?.let { cacheData = it }
 
                 when {
-
                     pair.first?.instanceType == InstanceType.Pixelfed &&
                         !Pref.bpEnablePixelfed(App1.pref) &&
                         !req.allowPixelfed ->
@@ -375,9 +419,11 @@ class TootInstance(parser: TootParser, src: JsonObject) {
             }
 
             init {
-                GlobalScope.launch(Dispatchers.IO) {
+                launchDefault{
                     while (true) {
-                        requestQueue.receive().let { it.result.send(handleRequest(it)) }
+                        for( req in requestQueue){
+                            req.result.send(handleRequest(req))
+                        }
                     }
                 }
             }
@@ -398,7 +444,9 @@ class TootInstance(parser: TootParser, src: JsonObject) {
 
         // get from cache
         // no request, no expiration check
-        fun getCached(host: String) = Host.parse(host).getCacheEntry().cacheData
+        fun getCached(apiHost: String) = Host.parse(apiHost).getCacheEntry().cacheData
+        fun getCached(apiHost: Host) = apiHost.getCacheEntry().cacheData
+        fun getCached(a:SavedAccount?) = a?.apiHost?.getCacheEntry()?.cacheData
 
         suspend fun get(client: TootApiClient): Pair<TootInstance?, TootApiResult?> = getEx(client)
 
@@ -418,9 +466,9 @@ class TootInstance(parser: TootParser, src: JsonObject) {
             return queuedRequest(allowPixelfed) { cached ->
 
                 // may use cached item.
-                if (!forceUpdate && forceAccessToken == null && cached!=null) {
+                if (!forceUpdate && forceAccessToken == null && cached != null) {
                     val now = SystemClock.elapsedRealtime()
-                    if ( now - cached.time_parse <= EXPIRE)
+                    if (now - cached.time_parse <= EXPIRE)
                         return@queuedRequest Pair(cached, TootApiResult())
                 }
 

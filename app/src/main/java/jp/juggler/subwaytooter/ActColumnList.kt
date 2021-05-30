@@ -28,13 +28,12 @@ class ActColumnList : AppCompatActivity() {
 		const val EXTRA_ORDER = "order"
 		const val EXTRA_SELECTION = "selection"
 		
-		fun open(activity : ActMain, currentItem : Int, requestCode : Int) {
-			val array = activity.app_state.encodeColumnList()
-			AppState.saveColumnList(activity, TMP_FILE_COLUMN_LIST, array)
-			val intent = Intent(activity, ActColumnList::class.java)
-			intent.putExtra(EXTRA_SELECTION, currentItem)
-			activity.startActivityForResult(intent, requestCode)
-		}
+		fun createIntent(activity : ActMain, currentItem : Int) =
+			Intent(activity, ActColumnList::class.java).apply {
+				val array = activity.app_state.encodeColumnList()
+				AppState.saveColumnList(activity, TMP_FILE_COLUMN_LIST, array)
+				putExtra(EXTRA_SELECTION, currentItem)
+			}
 	}
 	
 	private lateinit var listView : DragListView
@@ -119,7 +118,7 @@ class ActColumnList : AppCompatActivity() {
 				// 左にスワイプした(右端に青が見えた) なら要素を削除する
 				if(swipedDirection == ListSwipeItem.SwipeDirection.LEFT) {
 					val adapterItem = item.tag as MyItem
-					if(adapterItem.json.optBoolean(Column.KEY_DONT_CLOSE, false)) {
+					if(adapterItem.json.optBoolean(ColumnEncoder.KEY_DONT_CLOSE, false)) {
 						showToast(false, R.string.column_has_dont_close_option)
 						listView.resetSwipedViews(null)
 						return
@@ -193,13 +192,13 @@ class ActColumnList : AppCompatActivity() {
 	// リスト要素のデータ
 	internal class MyItem(val json : JsonObject, val id : Long, context : Context) {
 		
-		val name : String = json.optString(Column.KEY_COLUMN_NAME)
-		val acct : Acct = Acct.parse(json.optString(Column.KEY_COLUMN_ACCESS_ACCT))
-		val acct_name : String = json.optString(Column.KEY_COLUMN_ACCESS_STR)
-		val old_index = json.optInt(Column.KEY_OLD_INDEX)
-		val type = ColumnType.parse(json.optInt(Column.KEY_TYPE))
-		val acct_color_bg = json.optInt(Column.KEY_COLUMN_ACCESS_COLOR_BG, 0)
-		val acct_color_fg = json.optInt(Column.KEY_COLUMN_ACCESS_COLOR, 0)
+		val name : String = json.optString(ColumnEncoder.KEY_COLUMN_NAME)
+		val acct : Acct = Acct.parse(json.optString(ColumnEncoder.KEY_COLUMN_ACCESS_ACCT))
+		val acct_name : String = json.optString(ColumnEncoder.KEY_COLUMN_ACCESS_STR)
+		val old_index = json.optInt(ColumnEncoder.KEY_OLD_INDEX)
+		val type = ColumnType.parse(json.optInt(ColumnEncoder.KEY_TYPE))
+		val acct_color_bg = json.optInt(ColumnEncoder.KEY_COLUMN_ACCESS_COLOR_BG, 0)
+		val acct_color_fg = json.optInt(ColumnEncoder.KEY_COLUMN_ACCESS_COLOR, 0)
 			.notZero() ?: context.attrColor(R.attr.colorColumnListItemText)
 		var bOldSelection : Boolean = false
 		

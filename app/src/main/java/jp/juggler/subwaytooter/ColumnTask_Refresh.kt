@@ -144,7 +144,7 @@ class ColumnTask_Refresh(
                     }
                 }
 
-                column.replaceConversationSummary(changeList, list_new, column.list_data)
+                replaceConversationSummary(changeList, list_new, column.list_data)
 
                 val added = list_new.size // may 0
 
@@ -1206,7 +1206,7 @@ class ColumnTask_Refresh(
     }
 
     suspend fun getScheduledStatuses(client: TootApiClient): TootApiResult? {
-        val result = client.request(column.addRange(bBottom, Column.PATH_SCHEDULED_STATUSES))
+        val result = client.request(column.addRange(bBottom, ApiPath.PATH_SCHEDULED_STATUSES))
         val src = parseList(::TootScheduled, parser, result?.jsonArray)
         list_tmp = addAll(list_tmp, src)
         column.saveRange(bBottom, !bBottom, result, src)

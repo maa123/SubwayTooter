@@ -1,24 +1,21 @@
 package jp.juggler.subwaytooter
 
-import android.app.Dialog
 import android.content.Context
-import android.content.Intent
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Bundle
-import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.LinearLayoutManager
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.woxthebox.draglistview.DragItem
 import com.woxthebox.draglistview.DragItemAdapter
 import com.woxthebox.draglistview.DragListView
 import com.woxthebox.draglistview.swipe.ListSwipeHelper
 import com.woxthebox.draglistview.swipe.ListSwipeItem
-import jp.juggler.subwaytooter.dialog.DlgTextInput
 import jp.juggler.subwaytooter.table.HighlightWord
 import jp.juggler.util.*
 import java.lang.ref.WeakReference
@@ -30,14 +27,22 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 		
 		private val log = LogCategory("ActHighlightWordList")
 		
-		private const val REQUEST_CODE_EDIT = 1
 	}
 	
 	private lateinit var listView : DragListView
 	private lateinit var listAdapter : MyListAdapter
 	
 	private var last_ringtone : WeakReference<Ringtone>? = null
-	
+
+	private val arEdit = activityResultHandler { ar->
+		try {
+			if( ar?.resultCode == RESULT_OK )
+				loadData()
+		} catch(ex : Throwable) {
+			throw RuntimeException("can't load data", ex)
+		}
+	}
+
 	//	@Override public void onBackPressed(){
 	//		setResult( RESULT_OK );
 	//		super.onBackPressed();
@@ -45,6 +50,7 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 	
 	override fun onCreate(savedInstanceState : Bundle?) {
 		super.onCreate(savedInstanceState)
+		arEdit .register(this,log)
 		App1.setActivityTheme(this)
 		initUI()
 		loadData()
@@ -248,49 +254,15 @@ class ActHighlightWordList : AppCompatActivity(), View.OnClickListener {
 	}
 	
 	private fun create() {
-		DlgTextInput.show(
-			this,
-			getString(R.string.new_item),
-			"",
-			callback = object : DlgTextInput.Callback {
-				override fun onEmptyError() {
-					showToast(true, R.string.word_empty)
-				}
-				
-				override fun onOK(dialog : Dialog, text : String) {
-					var item = HighlightWord.load(text)
-					if(item == null) {
-						item = HighlightWord(text)
-						item.save(this@ActHighlightWordList)
-						loadData()
-					}
-					edit(item)
-					
-					dialog.dismissSafe()
-				}
-			})
+		arEdit.launch(
+			ActHighlightWordEdit.createIntent(this, "")
+		)
 	}
 	
-	private fun edit(item : HighlightWord) {
-		ActHighlightWordEdit.open(this, REQUEST_CODE_EDIT, item)
-	}
-	
-	override fun onActivityResult(requestCode : Int, resultCode : Int, data : Intent?) {
-		when {
-			requestCode == REQUEST_CODE_EDIT &&
-				resultCode == RESULT_OK &&
-				data != null ->
-				try {
-					val sv = data.getStringExtra(ActHighlightWordEdit.EXTRA_ITEM) ?: return
-					val item = HighlightWord(sv.decodeJsonObject())
-					item.save(this@ActHighlightWordList)
-					loadData()
-				} catch(ex : Throwable) {
-					throw RuntimeException("can't load data", ex)
-				}
-			
-			else -> super.onActivityResult(requestCode, resultCode, data)
-		}
+	private fun edit(oldItem : HighlightWord) {
+		arEdit.launch(
+			ActHighlightWordEdit.createIntent(this,  oldItem.id)
+		)
 	}
 	
 	private fun stopLastRingtone() {

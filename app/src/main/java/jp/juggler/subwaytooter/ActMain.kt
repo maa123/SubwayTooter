@@ -18,6 +18,7 @@ import android.view.*
 import android.view.inputmethod.EditorInfo
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -28,12 +29,11 @@ import jp.juggler.subwaytooter.api.*
 import jp.juggler.subwaytooter.api.entity.*
 import jp.juggler.subwaytooter.api.entity.TootStatus.Companion.findStatusIdFromUrl
 import jp.juggler.subwaytooter.api.entity.TootTag.Companion.findHashtagFromUrl
-import jp.juggler.subwaytooter.dialog.AccountPicker
-import jp.juggler.subwaytooter.dialog.ActionsDialog
-import jp.juggler.subwaytooter.dialog.DlgQuickTootMenu
-import jp.juggler.subwaytooter.dialog.DlgTextInput
+import jp.juggler.subwaytooter.dialog.*
 import jp.juggler.subwaytooter.notification.PollingWorker
+import jp.juggler.subwaytooter.notification.PushSubscriptionHelper
 import jp.juggler.subwaytooter.span.MyClickableSpan
+import jp.juggler.subwaytooter.span.MyClickableSpanHandler
 import jp.juggler.subwaytooter.table.AcctColor
 import jp.juggler.subwaytooter.table.SavedAccount
 import jp.juggler.subwaytooter.util.*
@@ -55,8 +55,11 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-class ActMain : AsyncActivity(), View.OnClickListener,
-    ViewPager.OnPageChangeListener, DrawerLayout.DrawerListener {
+class ActMain : AppCompatActivity(),
+    View.OnClickListener,
+    ViewPager.OnPageChangeListener,
+    DrawerLayout.DrawerListener,
+    MyClickableSpanHandler {
 
     class PhoneEnv {
 
@@ -80,19 +83,19 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         const val RESULT_APP_DATA_IMPORT = Activity.RESULT_FIRST_USER
 
         // リクエスト
-        const val REQUEST_CODE_COLUMN_LIST = 1
-        const val REQUEST_CODE_ACCOUNT_SETTING = 2
-        const val REQUEST_APP_ABOUT = 3
-        const val REQUEST_CODE_NICKNAME = 4
-        const val REQUEST_CODE_POST = 5
-        const val REQUEST_CODE_COLUMN_COLOR = 6
-        const val REQUEST_CODE_APP_SETTING = 7
-        const val REQUEST_CODE_TEXT = 8
-        const val REQUEST_CODE_LANGUAGE_FILTER = 9
+//        const val REQUEST_CODE_COLUMN_LIST = 1
+//        const val REQUEST_APP_ABOUT = 3
+//        const val REQUEST_CODE_NICKNAME = 4
+//        const val REQUEST_CODE_POST = 5
+//        const val REQUEST_CODE_TEXT = 8
+//        const val REQUEST_CODE_LANGUAGE_FILTER = 9
 
         const val COLUMN_WIDTH_MIN_DP = 300
 
         const val STATE_CURRENT_PAGE = "current_page"
+
+        // ActPostから参照される
+        var refActMain: WeakReference<ActMain>? = null
 
         // 外部からインテントを受信した後、アカウント選択中に画面回転したらアカウント選択からやり直す
         internal var sent_intent2: Intent? = null
@@ -120,6 +123,9 @@ class ActMain : AsyncActivity(), View.OnClickListener,
     var timeline_spacing: Float? = null
     var avatarIconSize: Int = 0
     var notificationTlIconSize: Int = 0
+
+    // マルチウィンドウモードで子ウィンドウを閉じるのに使う
+    val closeList = LinkedList<WeakReference<AppCompatActivity>>()
 
     // onResume() .. onPause() の間なら真
     private var isResumed = false
@@ -227,7 +233,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         }
     }
 
-    private val link_click_listener: (View, MyClickableSpan) -> Unit = { viewClicked, span ->
+    override fun onMyClickableSpanClicked(viewClicked: View, span: MyClickableSpan) {
 
         // ビュー階層を下から辿って文脈を取得する
         var column: Column? = null
@@ -411,12 +417,107 @@ class ActMain : AsyncActivity(), View.OnClickListener,
     val quickTootText: String
         get() = etQuickToot.text.toString()
 
+    val arColumnColor = activityResultHandler { ar ->
+        val data = ar?.data
+        if (data != null && ar.resultCode == Activity.RESULT_OK) {
+            app_state.saveColumnList()
+            val idx = data.getIntExtra(ActColumnCustomize.EXTRA_COLUMN_INDEX, 0)
+            app_state.column(idx)?.let {
+                it.fireColumnColor()
+                it.fireShowContent(
+                    reason = "ActMain column color changed",
+                    reset = true
+                )
+            }
+            updateColumnStrip()
+        }
+    }
+
+    val arLanguageFilter = activityResultHandler { ar ->
+        val data = ar?.data
+        if (data != null && ar.resultCode == Activity.RESULT_OK) {
+            app_state.saveColumnList()
+            val idx = data.getIntExtra(ActLanguageFilter.EXTRA_COLUMN_INDEX, 0)
+            app_state.column(idx)?.onLanguageFilterChanged()
+
+        }
+    }
+
+    val arNickname = activityResultHandler { ar ->
+        if (ar?.resultCode == Activity.RESULT_OK) {
+            updateColumnStrip()
+            app_state.columnList.forEach { it.fireShowColumnHeader() }
+        }
+    }
+
+    val arAppSetting = activityResultHandler { ar ->
+        Column.reloadDefaultColor(this, pref)
+        showFooterColor()
+        updateColumnStrip()
+        if (ar?.resultCode == RESULT_APP_DATA_IMPORT) {
+            ar.data?.data?.let { importAppData(it) }
+        }
+    }
+
+    val arAbout = activityResultHandler { ar ->
+        val data = ar?.data
+        if (data != null && ar.resultCode == Activity.RESULT_OK) {
+            data.getStringExtra(ActAbout.EXTRA_SEARCH)?.notEmpty()?.let { search ->
+                timeline(
+                    defaultInsertPosition,
+                    ColumnType.SEARCH,
+                    args = arrayOf(search, true)
+                )
+            }
+        }
+    }
+
+    val arAccountSetting = activityResultHandler { ar ->
+        updateColumnStrip()
+        app_state.columnList.forEach { it.fireShowColumnHeader() }
+        when (ar?.resultCode) {
+            RESULT_OK -> ar.data?.data?.let { openBrowser(it) }
+
+            ActAccountSetting.RESULT_INPUT_ACCESS_TOKEN ->
+                ar.data?.getLongExtra(ActAccountSetting.EXTRA_DB_ID, -1L)
+                    ?.takeIf { it != -1L }
+                    ?.let { checkAccessToken2(it) }
+        }
+    }
+
+    val arColumnList = activityResultHandler { ar ->
+        val data = ar?.data
+        if (data != null && ar.resultCode == Activity.RESULT_OK) {
+            val order = data.getIntegerArrayListExtra(ActColumnList.EXTRA_ORDER)
+            if (order != null && isOrderChanged(order)) {
+                setOrder(order)
+            }
+
+            val select = data.getIntExtra(ActColumnList.EXTRA_SELECTION, -1)
+            if (select in 0 until app_state.columnCount) {
+                scrollToColumn(select)
+            }
+        }
+    }
+
     //////////////////////////////////////////////////////////////////
     // アクティビティイベント
 
     override fun onCreate(savedInstanceState: Bundle?) {
         log.d("onCreate")
         super.onCreate(savedInstanceState)
+        refActMain = WeakReference(this)
+
+        arColumnColor.register(this, log)
+        arLanguageFilter.register(this, log)
+        arNickname.register(this, log)
+        arAppSetting.register(this, log)
+        arAbout.register(this, log)
+        arAccountSetting.register(this, log)
+        arColumnList.register(this, log)
+        arActPost.register(this, log)
+        arActText.register(this, log)
+
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         App1.setActivityTheme(this, noActionBar = true)
 
@@ -470,7 +571,18 @@ class ActMain : AsyncActivity(), View.OnClickListener,
     override fun onDestroy() {
         log.d("onDestroy")
         super.onDestroy()
+        refActMain = null
         post_helper.onDestroy()
+
+        // 子画面を全て閉じる
+        closeList.forEach {
+            try {
+                it.get()?.finish()
+            } catch (ex: Throwable) {
+                log.e(ex, "close failed?")
+            }
+        }
+        closeList.clear()
 
         // このアクティビティに関連する ColumnViewHolder への参照を全カラムから除去する
         app_state.columnList.forEach {
@@ -624,7 +736,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         ts = SystemClock.elapsedRealtime()
 
         // 画面復帰時に再取得などを行う
-        app_state.columnList.forEach { it.onStart() }
+        app_state.columnList.forEach { it.onActivityStart() }
 
         te = SystemClock.elapsedRealtime()
         if (te - ts >= 100L) log.w("onStart: ${te - ts}ms :column.onStart")
@@ -717,7 +829,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         at android.os.Binder.execTransact (Binder.java:739)
         */
 
-        MyClickableSpan.link_callback = WeakReference(link_click_listener)
+        // TODO MyClickableSpan.link_callback = WeakReference(link_click_listener)
 
         if (Pref.bpDontScreenOff(pref)) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -736,7 +848,6 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         if (intent != null) {
             handleSentIntent(intent)
         }
-
     }
 
     override fun onPause() {
@@ -794,7 +905,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                 drawer.openDrawer(GravityCompat.START)
             }
 
-            R.id.btnToot -> Action_Account.openPost(this)
+            R.id.btnToot -> openPost()
             R.id.btnQuickToot -> performQuickPost(null)
             R.id.btnQuickTootMenu -> performQuickTootMenu()
         }
@@ -847,6 +958,31 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         dlgQuickTootMenu.toggle()
     }
 
+    private fun updatePostedStatus(data: Intent) {
+        posted_acct = data.getStringExtra(ActPost.EXTRA_POSTED_ACCT)?.let { Acct.parse(it) }
+        if (data.extras?.containsKey(ActPost.EXTRA_POSTED_STATUS_ID) == true) {
+            posted_status_id = EntityId.from(data, ActPost.EXTRA_POSTED_STATUS_ID)
+            posted_reply_id = EntityId.from(data, ActPost.EXTRA_POSTED_REPLY_ID)
+            posted_redraft_id = EntityId.from(data, ActPost.EXTRA_POSTED_REDRAFT_ID)
+        } else {
+            posted_status_id = null
+        }
+    }
+
+    val arActPost = activityResultHandler { ar ->
+        val data = ar?.data
+        if (data != null && ar.resultCode == Activity.RESULT_OK) {
+            etQuickToot.setText("")
+            updatePostedStatus(data)
+        }
+    }
+
+    fun onMultiWindowPostComplete(data: Intent) {
+        if (!isLiveActivity) return
+        updatePostedStatus(data)
+        if (isStart_) refreshAfterPost()
+    }
+
     private fun refreshAfterPost() {
         val posted_acct = this.posted_acct
         val posted_status_id = this.posted_status_id
@@ -859,11 +995,8 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                 ) {
                     column.startLoading()
                 }
-
             }
-
         } else if (posted_acct != null && posted_status_id != null) {
-
             val posted_redraft_id = this.posted_redraft_id
             if (posted_redraft_id != null) {
                 val host = posted_acct.host
@@ -897,17 +1030,14 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         sent_intent2 = intent
 
         // Galaxy S8+ で STのSSを取った後に出るポップアップからそのまま共有でSTを選ぶと何も起きない問題への対策
-        handler.post {
-            AccountPicker.pick(
-                this,
+        launchMain {
+            val ai = pickAccount(
                 bAllowPseudo = false,
                 bAuto = true,
                 message = getString(R.string.account_picker_toot),
-                dismiss_callback = { sent_intent2 = null }
-            ) { ai ->
-                sent_intent2 = null
-                ActPost.open(this@ActMain, REQUEST_CODE_POST, ai.db_id, sent_intent = intent)
-            }
+            )
+            sent_intent2 = null
+            ai?.let { openActPostImpl(it.db_id, sent_intent = intent) }
         }
     }
 
@@ -933,12 +1063,13 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                 performQuickPost(a)
             } else {
                 // アカウントを選択してやり直し
-                AccountPicker.pick(
-                    this,
-                    bAllowPseudo = false,
-                    bAuto = true,
-                    message = getString(R.string.account_picker_toot)
-                ) { ai -> performQuickPost(ai) }
+                launchMain {
+                    pickAccount(
+                        bAllowPseudo = false,
+                        bAuto = true,
+                        message = getString(R.string.account_picker_toot)
+                    )?.let { performQuickPost(it) }
+                }
             }
             return
         }
@@ -978,7 +1109,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         })
     }
 
-    private fun isOrderChanged(new_order: List<Int>): Boolean {
+    fun isOrderChanged(new_order: List<Int>): Boolean {
         if (new_order.size != app_state.columnCount) return true
         for (i in new_order.indices) {
             if (new_order[i] != i) return true
@@ -986,113 +1117,20 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         return false
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        log.d("onActivityResult req=$requestCode res=$resultCode data=$data")
 
-        if (resultCode == Activity.RESULT_OK) {
-            when (requestCode) {
-                REQUEST_CODE_COLUMN_LIST -> if (data != null) {
-                    val order = data.getIntegerArrayListExtra(ActColumnList.EXTRA_ORDER)
-                    if (order != null && isOrderChanged(order)) {
-                        setOrder(order)
-                    }
-
-                    val select = data.getIntExtra(ActColumnList.EXTRA_SELECTION, -1)
-                    if (select in 0 until app_state.columnCount) {
-                        scrollToColumn(select)
-                    }
-                }
-
-                REQUEST_APP_ABOUT -> if (data != null) {
-                    val search = data.getStringExtra(ActAbout.EXTRA_SEARCH)
-                    if (search?.isNotEmpty() == true) {
-                        Action_Account.timeline(
-                            this@ActMain,
-                            defaultInsertPosition,
-                            ColumnType.SEARCH,
-                            args = arrayOf(search, true)
-                        )
-                    }
-                    return
-                }
-
-                REQUEST_CODE_NICKNAME -> {
-                    updateColumnStrip()
-                    app_state.columnList.forEach { it.fireShowColumnHeader() }
-                }
-
-                REQUEST_CODE_POST -> if (data != null) {
-                    etQuickToot.setText("")
-                    posted_acct =
-                        data.getStringExtra(ActPost.EXTRA_POSTED_ACCT)?.let { Acct.parse(it) }
-                    if (data.extras?.containsKey(ActPost.EXTRA_POSTED_STATUS_ID) == true) {
-                        posted_status_id = EntityId.from(data, ActPost.EXTRA_POSTED_STATUS_ID)
-                        posted_reply_id = EntityId.from(data, ActPost.EXTRA_POSTED_REPLY_ID)
-                        posted_redraft_id = EntityId.from(data, ActPost.EXTRA_POSTED_REDRAFT_ID)
-                    } else {
-                        posted_status_id = null
-                    }
-                }
-
-                REQUEST_CODE_COLUMN_COLOR -> if (data != null) {
-                    app_state.saveColumnList()
-                    val idx = data.getIntExtra(ActColumnCustomize.EXTRA_COLUMN_INDEX, 0)
-                    app_state.column(idx)?.let {
-                        it.fireColumnColor()
-                        it.fireShowContent(
-                            reason = "ActMain column color changed",
-                            reset = true
-                        )
-                    }
-                    updateColumnStrip()
-                }
-
-                REQUEST_CODE_LANGUAGE_FILTER -> if (data != null) {
-                    app_state.saveColumnList()
-                    val idx = data.getIntExtra(ActLanguageFilter.EXTRA_COLUMN_INDEX, 0)
-                    app_state.column(idx)?.onLanguageFilterChanged()
-                }
-            }
+    private val arActText = activityResultHandler { ar ->
+        when (ar?.resultCode) {
+            ActText.RESULT_SEARCH_MSP ->
+                searchFromActivityResult(ar.data, ColumnType.SEARCH_MSP)
+            ActText.RESULT_SEARCH_TS ->
+                searchFromActivityResult(ar.data, ColumnType.SEARCH_TS)
+            ActText.RESULT_SEARCH_NOTESTOCK ->
+                searchFromActivityResult(ar.data, ColumnType.SEARCH_NOTESTOCK)
         }
-
-        when (requestCode) {
-
-            REQUEST_CODE_ACCOUNT_SETTING -> {
-                updateColumnStrip()
-
-                app_state.columnList.forEach { it.fireShowColumnHeader() }
-
-                when (resultCode) {
-                    RESULT_OK -> data?.data?.let { openBrowser(it) }
-
-                    ActAccountSetting.RESULT_INPUT_ACCESS_TOKEN ->
-                        data?.getLongExtra(ActAccountSetting.EXTRA_DB_ID, -1L)
-                            ?.takeIf { it != -1L }?.let { checkAccessToken2(it) }
-                }
-            }
-
-            REQUEST_CODE_APP_SETTING -> {
-                Column.reloadDefaultColor(this, pref)
-                showFooterColor()
-                updateColumnStrip()
-
-                if (resultCode == RESULT_APP_DATA_IMPORT) {
-                    data?.data?.let { importAppData(it) }
-                }
-            }
-
-            REQUEST_CODE_TEXT -> when (resultCode) {
-                ActText.RESULT_SEARCH_MSP -> searchFromActivityResult(data, ColumnType.SEARCH_MSP)
-                ActText.RESULT_SEARCH_TS -> searchFromActivityResult(data, ColumnType.SEARCH_TS)
-                ActText.RESULT_SEARCH_NOTESTOCK -> searchFromActivityResult(
-                    data,
-                    ColumnType.SEARCH_NOTESTOCK
-                )
-            }
-        }
-
-        super.onActivityResult(requestCode, resultCode, data)
     }
+
+    fun launchActText(intent: Intent) = arActText.launch(intent)
+
 
     override fun onBackPressed() {
 
@@ -1133,7 +1171,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
 
             Pref.BACK_EXIT_APP -> this@ActMain.finish()
 
-            Pref.BACK_OPEN_COLUMN_LIST -> Action_App.columnList(this@ActMain)
+            Pref.BACK_OPEN_COLUMN_LIST -> openColumnList()
 
             Pref.BACK_CLOSE_COLUMN -> {
 
@@ -1177,7 +1215,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                     }
                 }
 
-                dialog.addAction(getString(R.string.open_column_list)) { Action_App.columnList(this@ActMain) }
+                dialog.addAction(getString(R.string.open_column_list)) { openColumnList() }
                 dialog.addAction(getString(R.string.app_exit)) { this@ActMain.finish() }
                 dialog.show(this, null)
             }
@@ -1674,8 +1712,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         val statusInfo = url.findStatusIdFromUrl()
         if (statusInfo != null) {
             // ステータスをアプリ内で開く
-            Action_Toot.conversationOtherInstance(
-                this@ActMain,
+            conversationOtherInstance(
                 defaultInsertPosition,
                 statusInfo.url,
                 statusInfo.statusId,
@@ -1693,23 +1730,19 @@ class ActMain : AsyncActivity(), View.OnClickListener,
             val instance = m.groupEx(3)?.decodePercent()
 
             if (instance?.isNotEmpty() == true) {
-                Action_User.profile(
-                    this@ActMain,
+                userProfile(
                     defaultInsertPosition,
                     null,
-                    "https://$instance/@$user",
-                    Host.parse(instance),
-                    user,
+                    Acct.parse(user, instance),
+                    userUrl = "https://$instance/@$user",
                     original_url = url
                 )
             } else {
-                Action_User.profile(
-                    this@ActMain,
+                userProfile(
                     defaultInsertPosition,
                     null,
-                    url,
-                    Host.parse(host),
-                    user
+                    acct = Acct.parse(user, host),
+                    userUrl = url,
                 )
             }
             return
@@ -1721,13 +1754,11 @@ class ActMain : AsyncActivity(), View.OnClickListener,
             val host = m.groupEx(1)!!
             val user = m.groupEx(2)!!.decodePercent()
 
-            Action_User.profile(
-                this@ActMain,
+            userProfile(
                 defaultInsertPosition,
                 null,
-                url,
-                Host.parse(host),
-                user
+                acct = Acct.parse(user, host),
+                userUrl = url,
             )
             return
         }
@@ -1822,14 +1853,12 @@ class ActMain : AsyncActivity(), View.OnClickListener,
     }
 
     private fun handleOAuth2Callback(uri: Uri) {
-        TootTaskRunner(this@ActMain).run(object : TootTask {
-
-            var ta: TootAccount? = null
-            var sa: SavedAccount? = null
-            var apiHost: Host? = null
-            var apDomain: Host? = null
-
-            override suspend fun background(client: TootApiClient): TootApiResult? {
+        launchMain {
+            var resultTootAccount: TootAccount? = null
+            var resultSavedAccount: SavedAccount? = null
+            var resultApiHost: Host? = null
+            var resultApDomain: Host? = null
+            runApiTask { client ->
 
                 val uriStr = uri.toString()
                 if (uriStr.startsWith("subwaytooter://misskey/auth_callback")
@@ -1837,16 +1866,15 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                 ) {
 
                     // Misskey 認証コールバック
-                    val token = uri.getQueryParameter("token")
-                    if (token.isNullOrBlank())
-                        return TootApiResult("missing token in callback URL")
+                    val token = uri.getQueryParameter("token")?.notBlank()
+                        ?: return@runApiTask TootApiResult("missing token in callback URL")
 
-                    val prefDevice = PrefDevice.prefDevice(this@ActMain)
+                    val prefDevice = PrefDevice.prefDevice(this)
 
-                    val instance = Host.parse(
-                        prefDevice.getString(PrefDevice.LAST_AUTH_INSTANCE, null)
-                            ?: return TootApiResult("missing instance name.")
-                    )
+                    val hostStr = prefDevice.getString(PrefDevice.LAST_AUTH_INSTANCE, null)?.notBlank()
+                        ?: return@runApiTask TootApiResult("missing instance name.")
+
+                    val instance = Host.parse(hostStr)
 
                     when (val db_id = prefDevice.getLong(PrefDevice.LAST_AUTH_DB_ID, -1L)) {
 
@@ -1856,20 +1884,20 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                         // update access token
                         else -> try {
                             val sa = SavedAccount.loadAccount(this@ActMain, db_id)
-                                ?: return TootApiResult("missing account db_id=$db_id")
-                            this.sa = sa
+                                ?: return@runApiTask TootApiResult("missing account db_id=$db_id")
+                            resultSavedAccount = sa
                             client.account = sa
                         } catch (ex: Throwable) {
                             log.trace(ex)
-                            return TootApiResult(ex.withCaption("invalid state"))
+                            return@runApiTask TootApiResult(ex.withCaption("invalid state"))
                         }
                     }
 
                     val (ti, r2) = TootInstance.get(client)
-                    ti ?: return r2
+                    ti ?: return@runApiTask r2
 
-                    this.apiHost = instance
-                    this.apDomain = ti.uri?.let{ Host.parse(it)}
+                    resultApiHost = instance
+                    resultApDomain = ti.uri?.let { Host.parse(it) }
 
                     val parser = TootParser(
                         this@ActMain,
@@ -1879,11 +1907,13 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                         )
                     )
 
-                    return client.authentication2Misskey(
-                        Pref.spClientName(this@ActMain),
+                    client.authentication2Misskey(
+                        Pref.spClientName(pref),
                         token,
                         ti.misskeyVersion
-                    )?.also { this.ta = parser.account(it.jsonObject) }
+                    )?.also {
+                        resultTootAccount = parser.account(it.jsonObject)
+                    }
 
                 } else {
                     // Mastodon 認証コールバック
@@ -1896,7 +1926,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                     val error = uri.getQueryParameter("error")
                     val error_description = uri.getQueryParameter("error_description")
                     if (error != null || error_description != null)
-                        return TootApiResult(
+                        return@runApiTask TootApiResult(
                             error_description.notBlank() ?: error.notBlank()
                             ?: "?"
                         )
@@ -1905,26 +1935,23 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                     //    ?code=113cc036e078ac500d3d0d3ad345cd8181456ab087abc67270d40f40a4e9e3c2
                     //    &state=host%3Amastodon.juggler.jp
 
-                    val code = uri.getQueryParameter("code")
-                    val sv = uri.getQueryParameter("state")
+                    val code = uri.getQueryParameter("code")?.notBlank()
+                        ?: return@runApiTask TootApiResult("missing code in callback url.")
 
-                    if (code.isNullOrBlank())
-                        return TootApiResult("missing code in callback url.")
-
-                    if (sv.isNullOrBlank())
-                        return TootApiResult("missing state in callback url.")
+                    val sv = uri.getQueryParameter("state")?.notBlank()
+                        ?: return@runApiTask TootApiResult("missing state in callback url.")
 
                     for (param in sv.split(",")) {
                         when {
                             param.startsWith("db:") -> try {
                                 val dataId = param.substring(3).toLong(10)
                                 val sa = SavedAccount.loadAccount(this@ActMain, dataId)
-                                    ?: return TootApiResult("missing account db_id=$dataId")
-                                this.sa = sa
+                                    ?: return@runApiTask TootApiResult("missing account db_id=$dataId")
+                                resultSavedAccount = sa
                                 client.account = sa
                             } catch (ex: Throwable) {
                                 log.trace(ex)
-                                return TootApiResult(ex.withCaption("invalid state"))
+                                return@runApiTask TootApiResult(ex.withCaption("invalid state"))
                             }
 
                             param.startsWith("host:") -> {
@@ -1936,49 +1963,44 @@ class ActMain : AsyncActivity(), View.OnClickListener,
                         }
                     }
 
-                    val instance = client.apiHost
-                        ?: return TootApiResult("missing instance in callback url.")
-                    this.apiHost = instance
-
+                    val apiHost = client.apiHost
+                        ?: return@runApiTask TootApiResult("missing instance in callback url.")
+                    resultApiHost = apiHost
 
 
                     val parser = TootParser(
                         this@ActMain,
-                        linkHelper = LinkHelper.create(instance)
+                        linkHelper = LinkHelper.create(apiHost)
                     )
 
                     val refToken = AtomicReference<String>(null)
-                    return client.authentication2Mastodon(
-                        Pref.spClientName(this@ActMain),
+                    client.authentication2Mastodon(
+                        Pref.spClientName(pref),
                         code,
                         outAccessToken = refToken
-                    )?.also {
-                        this.ta = parser.account(it.jsonObject)
-                        if( ta != null){
+                    )?.also { result ->
+                        val ta = parser.account(result.jsonObject)
+                        if (ta != null) {
                             val (ti, ri) = TootInstance.getEx(client, forceAccessToken = refToken.get())
-                            ti ?: return ri
-                            this.apDomain = ti.uri?.let{ it2->  Host.parse(it2)}
+                            ti ?: return@runApiTask ri
+                            resultTootAccount = ta
+                            resultApDomain = ti.uri?.let { Host.parse(it) }
                         }
                     }
                 }
-            }
-
-            override suspend fun handleResult(result: TootApiResult?) {
-                val apiHost = this.apiHost
-                val apDomain = this.apDomain
-                val ta = this.ta
-                var sa = this.sa
-
+            }?.let { result ->
+                val apiHost = resultApiHost
+                val apDomain = resultApDomain
+                val ta = resultTootAccount
+                var sa = resultSavedAccount
                 if (ta != null && apiHost?.isValid == true && sa == null) {
-                    val acct = Acct.parse(ta.username, apDomain ?: apiHost )
+                    val acct = Acct.parse(ta.username, apDomain ?: apiHost)
                     // アカウント追加時に、アプリ内に既にあるアカウントと同じものを登録していたかもしれない
                     sa = SavedAccount.loadAccountByAcct(this@ActMain, acct.ascii)
                 }
-
                 afterAccountVerify(result, ta, sa, apiHost, apDomain)
             }
-
-        })
+        }
     }
 
     private fun handleCustomSchemaUri(uri: Uri) {
@@ -2105,74 +2127,6 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         return false
     }
 
-    // アクセストークンを手動で入力した場合
-    fun checkAccessToken(
-        dialog_host: Dialog?,
-        dialog_token: Dialog?,
-        apiHost: Host,
-        access_token: String,
-        sa: SavedAccount?
-    ) {
-
-        TootTaskRunner(this@ActMain).run(apiHost, object : TootTask {
-
-            var ta: TootAccount? = null
-            var apDomain : Host? = null
-
-            override suspend fun background(client: TootApiClient): TootApiResult? {
-
-                val (ti,ri) = TootInstance.getEx(client,forceAccessToken = access_token)
-                ti ?: return ri
-
-                val apDomain = ti.uri?.let { Host.parse(it) }
-                    ?: return TootApiResult("missing uri in Instance Information")
-
-                this.apDomain = apDomain
-
-                val misskeyVersion = ti.misskeyVersion
-
-                val result = client.getUserCredential(access_token, misskeyVersion = misskeyVersion)
-
-                this.ta = TootParser(
-                    this@ActMain,
-                    LinkHelper.create(
-                        apiHostArg = apiHost,
-                        apDomainArg = apDomain,
-                        misskeyVersion = misskeyVersion
-                    )
-                ).account(result?.jsonObject)
-
-                return result
-            }
-
-            override suspend fun handleResult(result: TootApiResult?) {
-                if (afterAccountVerify(result, ta, sa, apiHost, apDomain)) {
-                    dialog_host?.dismissSafe()
-                    dialog_token?.dismissSafe()
-                }
-            }
-        })
-    }
-
-    // アクセストークンの手動入力(更新)
-    private fun checkAccessToken2(db_id: Long) {
-
-        val sa = SavedAccount.loadAccount(this, db_id) ?: return
-
-        DlgTextInput.show(
-            this,
-            getString(R.string.access_token_or_api_token),
-            null,
-            callback = object : DlgTextInput.Callback {
-                override fun onOK(dialog: Dialog, text: String) {
-                    checkAccessToken(null, dialog, sa.apiHost, text, sa)
-                }
-
-                override fun onEmptyError() {
-                    showToast(true, R.string.token_not_specified)
-                }
-            })
-    }
 
     private fun reloadAccountSetting() {
         val done_list = ArrayList<SavedAccount>()
@@ -2307,7 +2261,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         if (!allowColumnDuplication) {
             // 既に同じカラムがあればそこに移動する
             app_state.columnList.forEachIndexed { i, column ->
-                if (column.isSameSpec(ai, type, params)) {
+                if (ColumnSpec.isSameSpec(column, ai, type, params)) {
                     scrollToColumn(i)
                     return column
                 }
@@ -2329,7 +2283,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         }
     }
 
-    private fun showFooterColor() {
+    fun showFooterColor() {
 
         val footer_button_bg_color = Pref.ipFooterButtonBgColor(pref)
         val footer_button_fg_color = Pref.ipFooterButtonFgColor(pref)
@@ -2440,7 +2394,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         updateColumnStrip()
     }
 
-    private fun setOrder(new_order: List<Int>) {
+    fun setOrder(new_order: List<Int>) {
 
         phoneOnly { env -> env.pager.adapter = null }
 
@@ -2530,7 +2484,7 @@ class ActMain : AsyncActivity(), View.OnClickListener,
         env.tablet_pager_adapter.notifyDataSetChanged()
     }
 
-    private fun scrollToColumn(index: Int, smoothScroll: Boolean = true) {
+    fun scrollToColumn(index: Int, smoothScroll: Boolean = true) {
         scrollColumnStrip(index)
         phoneTab(
 
@@ -2551,144 +2505,145 @@ class ActMain : AsyncActivity(), View.OnClickListener,
 //////////////////////////////////////////////////////////////////////////////////////////////
 
     @Suppress("BlockingMethodInNonBlockingContext")
-    private fun importAppData(uri: Uri) {
+    fun importAppData(uri: Uri) {
+        launchMain {
 
-        // remove all columns
-        phoneOnly { env -> env.pager.adapter = null }
+            // remove all columns
+            phoneOnly { env -> env.pager.adapter = null }
 
-        app_state.editColumnList(save = false) { list ->
-            list.forEach { it.dispose() }
-            list.clear()
-        }
+            app_state.editColumnList(save = false) { list ->
+                list.forEach { it.dispose() }
+                list.clear()
+            }
 
-        phoneTab(
-            { env -> env.pager.adapter = env.pager_adapter },
-            { env -> resizeColumnWidth(env) }
-        )
+            phoneTab(
+                { env -> env.pager.adapter = env.pager_adapter },
+                { env -> resizeColumnWidth(env) }
+            )
 
-        updateColumnStrip()
+            updateColumnStrip()
 
+            runWithProgress(
+                "importing app data",
 
-        runWithProgress(
-            "importing app data",
+                doInBackground = { progress ->
+                    fun setProgressMessage(sv: String) =
+                        runOnMainLooper { progress.setMessageEx(sv) }
 
-            doInBackground = { progress ->
-                fun setProgressMessage(sv: String) =
-                    runOnMainLooper { progress.setMessageEx(sv) }
+                    var newColumnList: ArrayList<Column>? = null
 
-                var newColumnList: ArrayList<Column>? = null
+                    setProgressMessage("import data to local storage...")
 
-                setProgressMessage("import data to local storage...")
-
-                // アプリ内領域に一時ファイルを作ってコピーする
-                val cacheDir = cacheDir
-                cacheDir.mkdir()
-                val file = File(
-                    cacheDir,
-                    "SubwayTooter.${Process.myPid()}.${Process.myTid()}.tmp"
-                )
-                val source = contentResolver.openInputStream(uri)
-                if (source == null) {
-                    showToast(true, "openInputStream failed.")
-                    return@runWithProgress null
-                }
-                source.use { inStream ->
-                    FileOutputStream(file).use { outStream ->
-                        IOUtils.copy(inStream, outStream)
+                    // アプリ内領域に一時ファイルを作ってコピーする
+                    val cacheDir = cacheDir
+                    cacheDir.mkdir()
+                    val file = File(
+                        cacheDir,
+                        "SubwayTooter.${Process.myPid()}.${Process.myTid()}.tmp"
+                    )
+                    val source = contentResolver.openInputStream(uri)
+                    if (source == null) {
+                        showToast(true, "openInputStream failed.")
+                        return@runWithProgress null
                     }
-                }
-
-                // 通知サービスを止める
-                setProgressMessage("syncing notification poller…")
-                PollingWorker.queueAppDataImportBefore(this@ActMain)
-                while (PollingWorker.mBusyAppDataImportBefore.get()) {
-                    delay(1000L)
-                    log.d("syncing polling task...")
-                }
-
-                // データを読み込む
-                setProgressMessage("reading app data...")
-                var zipEntryCount = 0
-                try {
-                    ZipInputStream(FileInputStream(file)).use { zipStream ->
-                        while (true) {
-                            val entry = zipStream.nextEntry ?: break
-                            ++zipEntryCount
-                            try {
-                                //
-                                val entryName = entry.name
-                                if (entryName.endsWith(".json")) {
-                                    newColumnList = AppDataExporter.decodeAppData(
-                                        this@ActMain,
-                                        JsonReader(InputStreamReader(zipStream, "UTF-8"))
-                                    )
-                                    continue
-                                }
-
-                                if (AppDataExporter.restoreBackgroundImage(
-                                        this@ActMain,
-                                        newColumnList,
-                                        zipStream,
-                                        entryName
-                                    )
-                                ) {
-                                    continue
-                                }
-                            } finally {
-                                zipStream.closeEntry()
-                            }
+                    source.use { inStream ->
+                        FileOutputStream(file).use { outStream ->
+                            IOUtils.copy(inStream, outStream)
                         }
                     }
-                } catch (ex: Throwable) {
-                    log.trace(ex)
-                    if (zipEntryCount != 0) {
-                        showToast(ex, "importAppData failed.")
+
+                    // 通知サービスを止める
+                    setProgressMessage("syncing notification poller…")
+                    PollingWorker.queueAppDataImportBefore(this@ActMain)
+                    while (PollingWorker.mBusyAppDataImportBefore.get()) {
+                        delay(1000L)
+                        log.d("syncing polling task...")
                     }
-                }
-                // zipではなかった場合、zipEntryがない状態になる。例外はPH-1では出なかったが、出ても問題ないようにする。
-                if (zipEntryCount == 0) {
-                    InputStreamReader(FileInputStream(file), "UTF-8").use { inStream ->
-                        newColumnList = AppDataExporter.decodeAppData(
-                            this@ActMain,
-                            JsonReader(inStream)
+
+                    // データを読み込む
+                    setProgressMessage("reading app data...")
+                    var zipEntryCount = 0
+                    try {
+                        ZipInputStream(FileInputStream(file)).use { zipStream ->
+                            while (true) {
+                                val entry = zipStream.nextEntry ?: break
+                                ++zipEntryCount
+                                try {
+                                    //
+                                    val entryName = entry.name
+                                    if (entryName.endsWith(".json")) {
+                                        newColumnList = AppDataExporter.decodeAppData(
+                                            this@ActMain,
+                                            JsonReader(InputStreamReader(zipStream, "UTF-8"))
+                                        )
+                                        continue
+                                    }
+
+                                    if (AppDataExporter.restoreBackgroundImage(
+                                            this@ActMain,
+                                            newColumnList,
+                                            zipStream,
+                                            entryName
+                                        )
+                                    ) {
+                                        continue
+                                    }
+                                } finally {
+                                    zipStream.closeEntry()
+                                }
+                            }
+                        }
+                    } catch (ex: Throwable) {
+                        log.trace(ex)
+                        if (zipEntryCount != 0) {
+                            showToast(ex, "importAppData failed.")
+                        }
+                    }
+                    // zipではなかった場合、zipEntryがない状態になる。例外はPH-1では出なかったが、出ても問題ないようにする。
+                    if (zipEntryCount == 0) {
+                        InputStreamReader(FileInputStream(file), "UTF-8").use { inStream ->
+                            newColumnList = AppDataExporter.decodeAppData(
+                                this@ActMain,
+                                JsonReader(inStream)
+                            )
+                        }
+                    }
+
+                    newColumnList
+                },
+                afterProc = {
+                    // cancelled.
+                    if (it == null) return@runWithProgress
+
+                    try {
+                        phoneOnly { env -> env.pager.adapter = null }
+
+                        app_state.editColumnList { list ->
+                            list.clear()
+                            list.addAll(it)
+                        }
+
+                        phoneTab(
+                            { env -> env.pager.adapter = env.pager_adapter },
+                            { env -> resizeColumnWidth(env) }
                         )
-                    }
-                }
-
-                newColumnList
-            },
-            afterProc = {
-                // cancelled.
-                if (it == null) return@runWithProgress
-
-                try {
-                    phoneOnly { env -> env.pager.adapter = null }
-
-                    app_state.editColumnList { list ->
-                        list.clear()
-                        list.addAll(it)
+                        updateColumnStrip()
+                    } finally {
+                        // 通知サービスをリスタート
+                        PollingWorker.queueAppDataImportAfter(this@ActMain)
                     }
 
-                    phoneTab(
-                        { env -> env.pager.adapter = env.pager_adapter },
-                        { env -> resizeColumnWidth(env) }
-                    )
-                    updateColumnStrip()
-                } finally {
-                    // 通知サービスをリスタート
-                    PollingWorker.queueAppDataImportAfter(this@ActMain)
+                    showToast(true, R.string.import_completed_please_restart_app)
+                    finish()
+                },
+                preProc = {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                },
+                postProc = {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
-
-                showToast(true, R.string.import_completed_please_restart_app)
-                finish()
-            },
-            preProc = {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            },
-            postProc = {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            }
-        )
+            )
+        }
     }
 
     override fun onDrawerSlide(drawerView: View, slideOffset: Float) {

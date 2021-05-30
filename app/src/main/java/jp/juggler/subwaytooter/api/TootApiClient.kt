@@ -138,13 +138,13 @@ class TootApiClient(
 
         fun simplifyErrorHtml(
             response: Response,
-            caption:String = "?",
-            bodyString:String =response.body?.string() ?: "",
+            caption: String = "?",
+            bodyString: String = response.body?.string() ?: "",
             jsonErrorParser: (json: JsonObject) -> String? = DEFAULT_JSON_ERROR_PARSER
         ) = TootApiResult(
             response = response,
             caption = caption,
-        ).simplifyErrorHtml( bodyString,jsonErrorParser)
+        ).simplifyErrorHtml(bodyString, jsonErrorParser)
     }
 
     // 認証に関する設定を保存する
@@ -964,11 +964,24 @@ class TootApiClient(
         // client_credential をまだ取得していないなら取得する
         var client_credential = client_info.string(KEY_CLIENT_CREDENTIAL)
         if (client_credential?.isEmpty() != false) {
-            val resultSub = getClientCredential(client_info)
-            client_credential = resultSub?.string
-            if (client_credential?.isEmpty() != false) return resultSub
-
-            client_info[KEY_CLIENT_CREDENTIAL] = client_credential
+            getClientCredential(client_info).let { resultSub ->
+                when {
+                    // https://github.com/tateisu/SubwayTooter/issues/156
+                    // some servers not support to get client_credentials.
+                    // just ignore error and skip.
+                    resultSub?.response?.code == 422 -> {
+                    }
+                    resultSub == null || resultSub.error != null -> {
+                        return resultSub
+                    }
+                    else -> {
+                        resultSub.string?.notEmpty()?.let {
+                            client_credential = it
+                            client_info[KEY_CLIENT_CREDENTIAL] = it
+                        }
+                    }
+                }
+            }
         }
 
         try {
@@ -1256,6 +1269,14 @@ class TootApiClient(
 
     }
 
+    fun copy() =TootApiClient(
+        context,
+        httpClient,
+        callback
+    ).also{dst->
+        dst.account = account
+        dst.apiHost = apiHost
+    }
 }
 
 // query: query_string after ? ( ? itself is excluded )

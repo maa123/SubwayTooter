@@ -3,15 +3,16 @@ package jp.juggler.subwaytooter
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.SystemClock
+import jp.juggler.subwaytooter.api.ApiPath
 import jp.juggler.subwaytooter.api.TootApiClient
 import jp.juggler.subwaytooter.api.TootApiResult
 import jp.juggler.subwaytooter.api.TootParser
-import jp.juggler.subwaytooter.api.entity.*
+import jp.juggler.subwaytooter.api.entity.TimelineItem
+import jp.juggler.subwaytooter.api.entity.TootAnnouncement
+import jp.juggler.subwaytooter.api.entity.TootInstance
+import jp.juggler.subwaytooter.api.entity.parseList
 import jp.juggler.subwaytooter.table.SavedAccount
-import jp.juggler.util.JsonObject
-import jp.juggler.util.WordTrieTree
-import jp.juggler.util.notEmpty
-import jp.juggler.util.withCaption
+import jp.juggler.util.*
 import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -73,7 +74,7 @@ abstract class ColumnTask(
 				else -> "active"
 			}
 			val local = ! column.search_resolve
-			return "${Column.PATH_PROFILE_DIRECTORY}&order=$order&local=$local"
+			return "${ApiPath.PATH_PROFILE_DIRECTORY}&order=$order&local=$local"
 		}
 	
 	internal suspend fun getAnnouncements(
@@ -124,17 +125,16 @@ abstract class ColumnTask(
 	}
 
 	fun start() {
-		job = GlobalScope.launch(Dispatchers.Main) {
-			handleResult(
-				try {
-					withContext(Dispatchers.IO) { background() }
-				} catch(ex : CancellationException) {
-					null // キャンセルされたらresult==nullとする
-				} catch(ex : Throwable) {
-					// その他のエラー
-					TootApiResult(ex.withCaption("error"))
-				}
-			)
+		job = launchMain {
+			val result = try {
+				withContext(Dispatchers.IO) { background() }
+			} catch(ex : CancellationException) {
+				null // キャンセルされたらresult==nullとする
+			} catch(ex : Throwable) {
+				// その他のエラー
+				TootApiResult(ex.withCaption("error"))
+			}
+			handleResult( result )
 		}
 	}
 }

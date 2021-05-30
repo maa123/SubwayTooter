@@ -18,7 +18,7 @@ import com.bumptech.glide.integration.okhttp3.OkHttpUrlLoader
 import com.bumptech.glide.load.engine.cache.InternalCacheDiskCacheFactory
 import com.bumptech.glide.load.engine.executor.GlideExecutor
 import com.bumptech.glide.load.model.GlideUrl
-import jp.juggler.emoji.EmojiMap
+import jp.juggler.subwaytooter.emoji.EmojiMap
 import jp.juggler.subwaytooter.api.TootApiClient
 import jp.juggler.subwaytooter.table.*
 import jp.juggler.subwaytooter.util.CustomEmojiCache
@@ -125,8 +125,9 @@ class App1 : Application() {
 		// 2020/9/20 57=>58 UserRelationテーブルに項目追加
 		// 2021/2/10 58=>59 SavedAccountテーブルに項目追加
 		// 2021/5/11 59=>60 SavedAccountテーブルに項目追加
+		// 2021/5/23 60=>61 SavedAccountテーブルに項目追加
 		
-		internal const val DB_VERSION = 60
+		internal const val DB_VERSION = 61
 		
 		private val tableList = arrayOf(
 			LogData,
